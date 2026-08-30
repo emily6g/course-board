@@ -1,18 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
-import { type Course, type SchoolTask, type TaskType } from "./data";
+import SetupPanel from "./setup-panel";
+import { semesterWeek } from "../lib/tasks/dates";
+import { mergeTasks } from "../lib/tasks/merge";
+import { type Course, type SchoolTask, type Semester, type TaskType } from "../types/coursework";
 
 type Status = "not-started" | "in-progress" | "done";
 type StatusMap = Record<string, Status>;
 type TaskOverride = Pick<SchoolTask, "courseId" | "title" | "type" | "due" | "dueTime" | "note"> & { taskId: string };
 type OverrideMap = Record<string, TaskOverride>;
-type Semester = {
-  id: string;
-  name: string;
-  startDate: string;
-  endDate: string;
-};
+type Syllabus = { id: string; courseId: string; filename: string; status: string; error?: string };
 
 const typeLabels: Record<TaskType, string> = {
   homework: "Homework",
@@ -23,6 +21,7 @@ const typeLabels: Record<TaskType, string> = {
   presentation: "Presentation",
   discussion: "Discussion",
   reading: "Reading",
+  other: "Other",
 };
 
 function localDate(value: string) {
@@ -38,16 +37,6 @@ function dateKey(date: Date) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", weekday: "short" }).format(localDate(value));
-}
-
-function semesterWeek(value: string, semesterStartDate: string) {
-  const semesterStart = localDate(semesterStartDate);
-
-  const daysFromStart = Math.floor(
-    (localDate(value).getTime() - semesterStart.getTime()) / 86_400_000
-  );
-
-  return Math.max(1, Math.floor(daysFromStart / 7) + 1);
 }
 
 function semesterWeekRange(week: number, semesterStartDate: string) {
@@ -96,45 +85,6 @@ function taskCourse(task: SchoolTask, availableCourses: Course[]) {
   return availableCourses.find((course) => course.id === task.courseId);
 }
 
-function normalizedTitle(value: string) {
-  const numberWords: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6" };
-  return value.toLowerCase()
-    .replace(/\b(assignment|assign|due|exam)\b/g, "")
-    .replace(/\b(one|two|three|four|five|six)\b/g, (word) => numberWords[word])
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function mergeTasks(baseTasks: SchoolTask[], canvasTasks: SchoolTask[]) {
-  const merged: SchoolTask[] = baseTasks.map((task) => ({ 
-      ...task,
-    source: task.source ?? ("syllabus" as const),
-  }));
-
-  for (const canvasTask of canvasTasks) {
-    const matchIndex = merged.findIndex(
-      (task) =>
-        task.courseId === canvasTask.courseId &&
-        normalizedTitle(task.title) === normalizedTitle(canvasTask.title)
-    );
-
-    if (matchIndex >= 0) {
-      merged[matchIndex] = {
-        ...merged[matchIndex],
-        due: canvasTask.due,
-        dueTime: canvasTask.dueTime,
-        tentative: false,
-        source: "canvas",
-        url: canvasTask.url,
-      };
-    } else {
-      merged.push(canvasTask);
-    }
-  }
-
-  return merged;
-}
-
 function applyOverrides(baseTasks: SchoolTask[], overrides: OverrideMap) {
   return baseTasks.map((task) => {
     const override = overrides[task.id];
@@ -146,6 +96,11 @@ export default function Dashboard() {
   const [semesterData, setSemesterData] = useState<Semester | null>(null);
   const [baseCourses, setBaseCourses] = useState<Course[]>([]);
   const [baseTasks, setBaseTasks] = useState<SchoolTask[]>([]);
+  const [syllabi, setSyllabi] = useState<Syllabus[]>([]);
+  const [displayName, setDisplayName] = useState("");
+  const [timezone, setTimezone] = useState("");
+  const [showSetup, setShowSetup] = useState(false);
+  const [unmatchedCourses, setUnmatchedCourses] = useState<string[]>([]);
   const [courseDataLoading, setCourseDataLoading] = useState(true);
   const [courseDataError, setCourseDataError] = useState("");
   const [semesterName, setSemesterName] = useState("");
@@ -190,10 +145,16 @@ export default function Dashboard() {
         semester: Semester | null;
         courses: Course[];
         tasks: SchoolTask[];
+        syllabi?: Syllabus[];
+        displayName?: string;
+        timezone?: string;
       }) => {
         setSemesterData(data.semester ?? null);
         setBaseCourses(data.courses ?? []);
         setBaseTasks(data.tasks ?? []);
+        setSyllabi(data.syllabi ?? []);
+        setDisplayName(data.displayName ?? "");
+        setTimezone(data.timezone ?? "");
       }
     )
     .catch(() => {
@@ -230,13 +191,14 @@ export default function Dashboard() {
       try {
         const response = await fetch("/api/calendar", { cache: "no-store" });
         if (!response.ok) throw new Error("Calendar unavailable");
-        const data = await response.json() as { connected: boolean; sourceCount?: number; syncedAt?: string; events?: SchoolTask[]; courses?: Course[] };
+        const data = await response.json() as { connected: boolean; sourceCount?: number; syncedAt?: string; events?: SchoolTask[]; courses?: Course[]; unmatchedCourses?: string[] };
         if (!active) return;
         setCalendarTasks(data.events ?? []);
         setCalendarCourses(data.courses ?? []);
         setCanvasConnected(data.connected);
         setCalendarSourceCount(data.sourceCount ?? 0);
         setLastSynced(data.syncedAt ?? null);
+        setUnmatchedCourses(data.unmatchedCourses ?? []);
       } catch {
         if (active) setCanvasConnected(false);
       }
@@ -262,6 +224,7 @@ export default function Dashboard() {
         name: semesterName,
         startDate: semesterStartDate,
         endDate: semesterEndDate,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     });
 
@@ -525,6 +488,20 @@ export default function Dashboard() {
   );
 }
 
+  if (!baseCourses.length || showSetup) {
+    return (
+      <main className="dashboard-shell">
+        <header className="topbar">
+          <div className="brand-lockup"><span className="brand-mark">CB</span><div><p>{semesterData.name}</p><h1>Course Board</h1></div></div>
+          {baseCourses.length > 0 && <button className="secondary-button" onClick={() => setShowSetup(false)}>Dashboard</button>}
+        </header>
+        <SetupPanel semester={semesterData} courses={baseCourses} syllabi={syllabi} displayName={displayName} timezone={timezone || Intl.DateTimeFormat().resolvedOptions().timeZone} unmatchedCourses={unmatchedCourses} onClose={baseCourses.length ? () => setShowSetup(false) : undefined} />
+      </main>
+    );
+  }
+
+  const initials = displayName.trim() ? displayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") : "CB";
+
   return (
     <main className="dashboard-shell">
       <header className="topbar">
@@ -536,13 +513,14 @@ export default function Dashboard() {
             </div>        </div>
         <div className="header-meta">
           <span className={`source-pill ${canvasConnected === false ? "offline" : ""}`}><i /> {canvasConnected ? `${calendarSourceCount} calendars connected` : canvasConnected === null ? "Connecting calendars" : "Syllabuses ready"}</span>
-          <span className="avatar">EG</span>
+          <button className="settings-button" onClick={() => setShowSetup(true)}>Settings</button>
+          <span className="avatar">{initials}</span>
         </div>
       </header>
 
       <section className="overview" aria-labelledby="overview-heading">
         <div className="overview-heading">
-          <div><p className="eyebrow">Your semester at a glance</p><h2 id="overview-heading">{greeting}, Emily</h2></div>
+          <div><p className="eyebrow">Your semester at a glance</p><h2 id="overview-heading">{displayName ? `${greeting}, ${displayName}` : greeting}</h2></div>
           <p className="date-label">{new Intl.DateTimeFormat("en-US", { dateStyle: "full" }).format(now)}</p>
         </div>
         <div className="summary-grid">
@@ -596,6 +574,7 @@ export default function Dashboard() {
           </div>
           {syncError && <p className="sync-error" role="alert">Your last status change could not be saved. Please try again.</p>}
           <div className="task-groups">
+            {!filteredTasks.length && <div className="empty-state"><h3>No coursework here yet</h3><p>Upload and confirm a syllabus, connect Canvas, or adjust your filters.</p><button onClick={() => setShowSetup(true)}>Open settings</button></div>}
             {Object.entries(grouped).map(([week, weekTasks]) => (
               <section className="week-group" key={week}>
                 <div className="week-heading">
@@ -626,7 +605,7 @@ export default function Dashboard() {
                         <div className="task-copy">
                           <div className="task-title-line">
                             <h4>{task.url ? <a href={task.url} target="_blank" rel="noreferrer">{task.title}</a> : task.title}</h4>
-                            {task.source === "canvas" && <span className="canvas-badge">Canvas</span>}
+                            {(task.source === "canvas" || task.source === "merged") && <span className="canvas-badge">{task.source === "merged" ? "Syllabus + Canvas" : "Canvas"}</span>}
                             {task.tentative && <span className="tentative-badge">Tentative</span>}{task.optional && <span className="optional-badge">Optional</span>}
                           </div>
                           <p><span className="course-chip">{course.code}</span> {typeLabels[task.type]}{task.dueTime ? ` · ${task.dueTime}` : ""}</p>
