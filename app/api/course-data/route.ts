@@ -1,14 +1,48 @@
 import { getDb } from "../../../db";
-import { courses, semesters, tasks } from "../../../db/schema";
+import { desc, eq } from "drizzle-orm";
+import {
+  appSettings,
+  courses,
+  semesters,
+  syllabi,
+  tasks,
+} from "../../../db/schema";
 
 export async function GET() {
   const db = getDb();
 
-  const semesterRows = await db.select().from(semesters);
-  const courseRows = await db.select().from(courses);
-  const taskRows = await db.select().from(tasks);
-
-  const currentSemester = semesterRows[0] ?? null;
+  const [currentSemester] = await db
+    .select()
+    .from(semesters)
+    .orderBy(desc(semesters.id))
+    .limit(1);
+  const courseRows = currentSemester
+    ? await db
+        .select()
+        .from(courses)
+        .where(eq(courses.semesterId, currentSemester.id))
+    : [];
+  const courseIds = new Set(courseRows.map((course) => course.id));
+  const taskRows = currentSemester
+    ? (await db.select().from(tasks)).filter(
+        (task) => courseIds.has(task.courseId) && task.confirmed !== false,
+      )
+    : [];
+  const syllabusRows = currentSemester
+    ? (await db.select().from(syllabi)).filter((syllabus) =>
+        courseIds.has(syllabus.courseId),
+      )
+    : [];
+  const [displayName] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "displayName"))
+    .limit(1);
+  const [timezone] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "timezone"))
+    .limit(1);
 
   return Response.json({
     semester: currentSemester
@@ -25,6 +59,7 @@ export async function GET() {
       code: course.courseCode,
       title: course.courseName,
       color: course.color ?? "#64748b",
+      instructor: course.instructor ?? undefined,
     })),
 
     tasks: taskRows.map((task) => ({
@@ -32,15 +67,25 @@ export async function GET() {
       courseId: String(task.courseId),
       title: task.title,
       type: task.taskType,
-      due: task.dueDate,
+      due: task.dueDate ?? "",
       dueTime: task.startTime ?? undefined,
       note: task.notes ?? undefined,
       optional: Boolean(task.optional),
       source: task.source,
+      sourceEventId: task.sourceEventId ?? undefined,
+      url: task.canvasUrl ?? undefined,
     })),
+    syllabi: syllabusRows.map((syllabus) => ({
+      id: String(syllabus.id),
+      courseId: String(syllabus.courseId),
+      filename: syllabus.originalFilename,
+      status: syllabus.processingStatus ?? "uploaded",
+      error: syllabus.processingError ?? undefined,
+    })),
+    displayName: displayName?.value ?? "",
+    timezone: timezone?.value ?? "",
   });
 }
-
 
 export async function POST(request: Request) {
   const db = getDb();
@@ -49,16 +94,25 @@ export async function POST(request: Request) {
     name?: string;
     startDate?: string;
     endDate?: string;
+    timezone?: string;
   };
 
   const name = body.name?.trim();
   const startDate = body.startDate?.trim();
   const endDate = body.endDate?.trim();
+  const timezone = body.timezone?.trim();
 
   if (!name || !startDate || !endDate) {
     return Response.json(
       { error: "Semester name, start date, and end date are required." },
-      { status: 400 }
+      { status: 400 },
+    );
+  }
+
+  if (endDate <= startDate) {
+    return Response.json(
+      { error: "The semester end date must be after the start date." },
+      { status: 400 },
     );
   }
 
@@ -72,6 +126,22 @@ export async function POST(request: Request) {
     .returning();
 
   const semester = result[0];
+  if (timezone) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format();
+      await db
+        .insert(appSettings)
+        .values({
+          key: "timezone",
+          value: timezone,
+          updatedAt: new Date().toISOString(),
+        })
+        .onConflictDoUpdate({
+          target: appSettings.key,
+          set: { value: timezone, updatedAt: new Date().toISOString() },
+        });
+    } catch {}
+  }
 
   return Response.json({
     semester: {
