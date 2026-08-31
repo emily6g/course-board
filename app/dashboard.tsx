@@ -99,6 +99,7 @@ export default function Dashboard() {
   const [syllabi, setSyllabi] = useState<Syllabus[]>([]);
   const [displayName, setDisplayName] = useState("");
   const [timezone, setTimezone] = useState("");
+  const [setupComplete, setSetupComplete] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [unmatchedCourses, setUnmatchedCourses] = useState<string[]>([]);
   const [courseDataLoading, setCourseDataLoading] = useState(true);
@@ -148,6 +149,7 @@ export default function Dashboard() {
         syllabi?: Syllabus[];
         displayName?: string;
         timezone?: string;
+        setupComplete?: boolean;
       }) => {
         setSemesterData(data.semester ?? null);
         setBaseCourses(data.courses ?? []);
@@ -155,6 +157,7 @@ export default function Dashboard() {
         setSyllabi(data.syllabi ?? []);
         setDisplayName(data.displayName ?? "");
         setTimezone(data.timezone ?? "");
+        setSetupComplete(Boolean(data.setupComplete));
       }
     )
     .catch(() => {
@@ -164,6 +167,18 @@ export default function Dashboard() {
       setCourseDataLoading(false);
     });
 }, []);
+
+  async function finishSetup() {
+    const response = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setupComplete: true }),
+    });
+    const data = (await response.json()) as { error?: string };
+    if (!response.ok)
+      throw new Error(data.error ?? "Setup could not be completed.");
+    window.location.reload();
+  }
 
   useEffect(() => {
     fetch("/api/statuses")
@@ -488,14 +503,23 @@ export default function Dashboard() {
   );
 }
 
-  if (!baseCourses.length || showSetup) {
+  if (!baseCourses.length || !setupComplete || showSetup) {
     return (
       <main className="dashboard-shell">
         <header className="topbar">
           <div className="brand-lockup"><span className="brand-mark">CB</span><div><p>{semesterData.name}</p><h1>Course Board</h1></div></div>
-          {baseCourses.length > 0 && <button className="secondary-button" onClick={() => setShowSetup(false)}>Dashboard</button>}
+          {setupComplete && baseCourses.length > 0 && <button className="secondary-button" onClick={() => setShowSetup(false)}>Dashboard</button>}
         </header>
-        <SetupPanel semester={semesterData} courses={baseCourses} syllabi={syllabi} displayName={displayName} timezone={timezone || Intl.DateTimeFormat().resolvedOptions().timeZone} unmatchedCourses={unmatchedCourses} onClose={baseCourses.length ? () => setShowSetup(false) : undefined} />
+        <SetupPanel
+          semester={semesterData}
+          courses={baseCourses}
+          syllabi={syllabi}
+          displayName={displayName}
+          timezone={timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
+          unmatchedCourses={unmatchedCourses}
+          onClose={setupComplete ? () => window.location.reload() : undefined}
+          onFinish={!setupComplete ? finishSetup : undefined}
+        />
       </main>
     );
   }
@@ -513,6 +537,7 @@ export default function Dashboard() {
             </div>        </div>
         <div className="header-meta">
           <span className={`source-pill ${canvasConnected === false ? "offline" : ""}`}><i /> {canvasConnected ? `${calendarSourceCount} calendars connected` : canvasConnected === null ? "Connecting calendars" : "Syllabuses ready"}</span>
+          <button className="settings-button" onClick={() => setShowSetup(true)}>Add coursework</button>
           <button className="settings-button" onClick={() => setShowSetup(true)}>Settings</button>
           <span className="avatar">{initials}</span>
         </div>
