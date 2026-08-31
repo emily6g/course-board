@@ -17,6 +17,7 @@ Course Board turns syllabi and Canvas calendar feeds into one personal semester 
 - **Editable task details** including the title, course, work type, due date, due time, and notes. Personal edits can be restored to the original imported values.
 - **PDF and DOCX syllabus processing** that extracts dated coursework into a review list before anything is added to the dashboard.
 - **A review workflow** for correcting extracted items, excluding unwanted items, marking optional work, and adding anything the syllabus parser missed.
+- **Manual coursework entry** for adding an assignment, quiz, exam, project, reading, or other item even when a syllabus has no detailed schedule.
 - **Multiple Canvas calendar connections** with saved source names, connection testing, manual course mapping, and calendar refresh information.
 - **Syllabus and Canvas merging** that avoids duplicate tasks. Canvas supplies the current due date, time, and assignment link when both sources describe the same item, while syllabus notes and task details are preserved.
 - **Private self-hosted storage** using Cloudflare D1 for course data and settings and a private R2 bucket for original syllabus files.
@@ -24,9 +25,9 @@ Course Board turns syllabi and Canvas calendar feeds into one personal semester 
 ## How the dashboard works
 
 1. You create a semester, add your courses, and choose a color for each class.
-2. You upload a syllabus for each course. Course Board privately stores the original file and extracts possible coursework.
+2. For each course, you can upload a syllabus, enter coursework yourself, or use both. Course Board privately stores uploaded files and extracts possible coursework.
 3. You review every extracted item, make corrections, exclude anything you do not want, and confirm the final list.
-4. You can optionally connect one or more Canvas calendar feeds. Course Board tests each feed, imports its events, and asks you to map any course it cannot identify confidently.
+4. You can optionally connect one or more Canvas calendar feeds, including feeds from different schools or Canvas accounts. Course Board tests each feed, imports its events, and asks you to map any course it cannot identify confidently.
 5. Confirmed syllabus items and Canvas events are merged into the weekly dashboard. Your completion statuses, notes, and edits remain saved between visits.
 
 ## Prerequisites

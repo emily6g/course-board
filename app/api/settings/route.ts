@@ -6,6 +6,7 @@ export async function PUT(request: Request) {
   const body = (await request.json()) as {
     displayName?: string;
     timezone?: string;
+    setupComplete?: boolean;
     semester?: {
       id?: string;
       name?: string;
@@ -14,6 +15,22 @@ export async function PUT(request: Request) {
     };
   };
   const db = getDb();
+  if (typeof body.setupComplete === "boolean") {
+    await db
+      .insert(appSettings)
+      .values({
+        key: "setupComplete",
+        value: body.setupComplete ? "true" : "false",
+        updatedAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: {
+          value: body.setupComplete ? "true" : "false",
+          updatedAt: new Date().toISOString(),
+        },
+      });
+  }
   if (typeof body.displayName === "string") {
     await db
       .insert(appSettings)

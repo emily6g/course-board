@@ -6,6 +6,7 @@ import {
   type Course,
   type Semester,
   type TaskCandidate,
+  type TaskType,
 } from "../types/coursework";
 
 type Syllabus = {
@@ -30,6 +31,7 @@ export default function SetupPanel({
   timezone,
   unmatchedCourses = [],
   onClose,
+  onFinish,
 }: {
   semester: Semester;
   courses: Course[];
@@ -38,11 +40,21 @@ export default function SetupPanel({
   timezone: string;
   unmatchedCourses?: string[];
   onClose?: () => void;
+  onFinish?: () => Promise<void>;
 }) {
   const [courseCode, setCourseCode] = useState("");
   const [courseName, setCourseName] = useState("");
   const [instructor, setInstructor] = useState("");
   const [color, setColor] = useState("#517562");
+  const [selectedFiles, setSelectedFiles] = useState<Record<string, string>>(
+    {},
+  );
+  const [manualCourseId, setManualCourseId] = useState(courses[0]?.id ?? "");
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualType, setManualType] = useState<TaskType>("homework");
+  const [manualDue, setManualDue] = useState(semester.startDate);
+  const [manualDueTime, setManualDueTime] = useState("");
+  const [manualNote, setManualNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [reviewing, setReviewing] = useState<Syllabus | null>(null);
@@ -180,7 +192,7 @@ export default function SetupPanel({
   async function connectCanvas(event: FormEvent) {
     event.preventDefault();
     try {
-      await request("/api/canvas-sources", {
+      const data = (await request("/api/canvas-sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -188,9 +200,47 @@ export default function SetupPanel({
           name: canvasName,
           feedUrl: canvasUrl,
         }),
+      })) as { source?: CanvasSource };
+      if (data.source)
+        setSources((current) => [...current, data.source as CanvasSource]);
+      setCanvasName("");
+      setCanvasUrl("");
+      setMessage("Canvas calendar connected. You can add another one below.");
+    } catch {}
+  }
+
+  async function addManualTask(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await request("/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          courseId: manualCourseId,
+          title: manualTitle,
+          type: manualType,
+          due: manualDue,
+          dueTime: manualDueTime,
+          note: manualNote,
+        }),
       });
       window.location.reload();
     } catch {}
+  }
+
+  async function completeSetup() {
+    if (!onFinish) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await onFinish();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Setup could not be completed.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function saveSettings(event: FormEvent) {
@@ -232,7 +282,8 @@ export default function SetupPanel({
           <p className="eyebrow">Semester setup</p>
           <h2>{semester.name}</h2>
           <p>
-            Add courses, process each syllabus, and optionally connect Canvas.
+            Add all your courses, upload syllabi or enter coursework yourself,
+            and optionally connect one or more Canvas calendars.
           </p>
         </div>
         {onClose && (
@@ -271,7 +322,7 @@ export default function SetupPanel({
                       ? "✓ Ready"
                       : syllabus
                         ? syllabus.status
-                        : "Needs syllabus"}
+                        : "Syllabus optional"}
                   </span>
                   {!syllabus && (
                     <button
@@ -322,24 +373,34 @@ export default function SetupPanel({
               />
             </label>
             <label>
-              Color
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-              />
+              Pick a class color
+              <span className="color-picker-control">
+                <input
+                  aria-label="Pick a class color"
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                />
+                <span>{color.toUpperCase()}</span>
+              </span>
             </label>
-            <button disabled={saving}>Add course</button>
+            <button disabled={saving}>Add another course</button>
           </form>
         </article>
 
         <article className="setup-card">
           <p className="step-number">2</p>
-          <h3>Upload syllabi</h3>
+          <h3>Add coursework</h3>
           <p>
-            PDF and DOCX files stay private in your R2 bucket. Review extracted
-            dates before they reach the dashboard.
+            Upload a syllabus, add assignments yourself, or use both. A
+            syllabus is optional.
           </p>
+          {!courses.length && (
+            <p className="setup-empty-note">
+              Add a course first, then its syllabus and coursework controls
+              will appear here.
+            </p>
+          )}
           {courses.map((course) => {
             const syllabus = syllabi.find(
               (item) => item.courseId === course.id,
@@ -385,17 +446,107 @@ export default function SetupPanel({
                 ) : (
                   <form onSubmit={(event) => uploadSyllabus(event, course.id)}>
                     <input
+                      id={`syllabus-file-${course.id}`}
+                      className="file-picker-input"
                       required
                       name="file"
                       type="file"
                       accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      onChange={(event) =>
+                        setSelectedFiles((current) => ({
+                          ...current,
+                          [course.id]: event.target.files?.[0]?.name ?? "",
+                        }))
+                      }
                     />
-                    <button disabled={saving}>Upload</button>
+                    <label
+                      className="file-picker-button"
+                      htmlFor={`syllabus-file-${course.id}`}
+                    >
+                      {selectedFiles[course.id] || "Choose PDF or DOCX"}
+                    </label>
+                    <button disabled={saving}>Upload syllabus</button>
                   </form>
                 )}
               </div>
             );
           })}
+          {!!courses.length && (
+            <div className="manual-task-section">
+              <h4>Add a custom assignment or exam</h4>
+              <p>
+                Use this whenever a syllabus is missing an item or does not
+                include a detailed schedule.
+              </p>
+              <form className="manual-task-form" onSubmit={addManualTask}>
+                <label>
+                  Class
+                  <select
+                    required
+                    value={manualCourseId}
+                    onChange={(event) => setManualCourseId(event.target.value)}
+                  >
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.code} · {course.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="manual-title-field">
+                  Assignment name
+                  <input
+                    required
+                    placeholder="Exam 1 or Homework 3"
+                    value={manualTitle}
+                    onChange={(event) => setManualTitle(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Work type
+                  <select
+                    value={manualType}
+                    onChange={(event) =>
+                      setManualType(event.target.value as TaskType)
+                    }
+                  >
+                    {taskTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type[0].toUpperCase() + type.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Due date
+                  <input
+                    required
+                    type="date"
+                    value={manualDue}
+                    onChange={(event) => setManualDue(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Due time, optional
+                  <input
+                    placeholder="11:59 PM"
+                    value={manualDueTime}
+                    onChange={(event) => setManualDueTime(event.target.value)}
+                  />
+                </label>
+                <label className="manual-note-field">
+                  Notes, optional
+                  <textarea
+                    rows={3}
+                    placeholder="Add study topics, instructions, or reminders"
+                    value={manualNote}
+                    onChange={(event) => setManualNote(event.target.value)}
+                  />
+                </label>
+                <button disabled={saving}>Add to dashboard</button>
+              </form>
+            </div>
+          )}
         </article>
 
         <article className="setup-card">
@@ -403,7 +554,8 @@ export default function SetupPanel({
           <h3>Connect Canvas</h3>
           <p>
             In Canvas, open Calendar, then Calendar Feed. The private URL is
-            stored only in your D1 database.
+            stored only in your D1 database. Repeat this form for every Canvas
+            account or school you use.
           </p>
           {sources.map((source) => (
             <div className="progress-row" key={source.id}>
@@ -418,7 +570,10 @@ export default function SetupPanel({
                     await request(`/api/canvas-sources?id=${source.id}`, {
                       method: "DELETE",
                     });
-                    window.location.reload();
+                    setSources((current) =>
+                      current.filter((item) => item.id !== source.id),
+                    );
+                    setMessage("Canvas calendar disconnected.");
                   } catch {}
                 }}
               >
@@ -458,7 +613,9 @@ export default function SetupPanel({
                 onChange={(e) => setCanvasUrl(e.target.value)}
               />
             </label>
-            <button disabled={saving}>Test and connect</button>
+            <button disabled={saving}>
+              {sources.length ? "Add another Canvas calendar" : "Test and connect"}
+            </button>
           </form>
           {unmatchedCourses.map((key) => (
             <label className="mapping-row" key={key}>
@@ -531,6 +688,21 @@ export default function SetupPanel({
           </form>
         </article>
       </div>
+
+      {onFinish && (
+        <div className="setup-finish-bar">
+          <div>
+            <strong>Finished adding your classes?</strong>
+            <span>
+              You can return to Settings anytime to add more courses,
+              coursework, syllabi, or Canvas calendars.
+            </span>
+          </div>
+          <button onClick={completeSetup} disabled={saving || !courses.length}>
+            Finish setup and open dashboard
+          </button>
+        </div>
+      )}
 
       {reviewing && (
         <div className="edit-overlay">

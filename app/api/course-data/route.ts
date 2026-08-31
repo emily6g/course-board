@@ -43,6 +43,11 @@ export async function GET() {
     .from(appSettings)
     .where(eq(appSettings.key, "timezone"))
     .limit(1);
+  const [setupComplete] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, "setupComplete"))
+    .limit(1);
 
   return Response.json({
     semester: currentSemester
@@ -84,6 +89,7 @@ export async function GET() {
     })),
     displayName: displayName?.value ?? "",
     timezone: timezone?.value ?? "",
+    setupComplete: setupComplete?.value === "true",
   });
 }
 

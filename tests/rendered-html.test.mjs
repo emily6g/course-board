@@ -8,16 +8,24 @@ const courseDataPath = new URL(
   import.meta.url,
 );
 const schemaPath = new URL("../db/schema.ts", import.meta.url);
+const setupPath = new URL("../app/setup-panel.tsx", import.meta.url);
+const manualTasksPath = new URL("../app/api/tasks/route.ts", import.meta.url);
 
 test("template keeps the dashboard D1-backed and free of personal defaults", async () => {
-  const [dashboard, courseData, schema] = await Promise.all([
+  const [dashboard, courseData, schema, setup, manualTasks] = await Promise.all([
     fs.readFile(dashboardPath, "utf8"),
     fs.readFile(courseDataPath, "utf8"),
     fs.readFile(schemaPath, "utf8"),
+    fs.readFile(setupPath, "utf8"),
+    fs.readFile(manualTasksPath, "utf8"),
   ]);
   assert.match(dashboard, /Week \{week\}/);
   assert.doesNotMatch(dashboard, /Emily|\bEG\b/);
   assert.match(courseData, /where\(eq\(courses\.semesterId/);
   assert.match(schema, /taskCandidates/);
   assert.match(schema, /canvasSources/);
+  assert.match(setup, /Finish setup and open dashboard/);
+  assert.match(setup, /Add a custom assignment or exam/);
+  assert.match(setup, /Add another Canvas calendar/);
+  assert.match(manualTasks, /source: "manual"/);
 });
