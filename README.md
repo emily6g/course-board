@@ -4,6 +4,29 @@ Course Board is a private, self-hosted semester dashboard. Upload PDF or DOCX sy
 
 Each copy uses its owner's Cloudflare Worker, D1 database, and private R2 bucket. It is intentionally a one-person app, so it does not include accounts or shared tenancy.
 
+## What Course Board provides
+
+Course Board turns syllabi and Canvas calendar feeds into one personal semester workspace. The dashboard provides:
+
+- **A semester overview** with the current date, the number of items due today and this week, and the next upcoming task.
+- **A weekly coursework timeline** that organizes assignments, quizzes, readings, projects, presentations, and exams by semester week and due date.
+- **Course colors and filters** for viewing one class, all classes, a specific work type, or completed coursework.
+- **Progress tracking** with not started, in progress, and done statuses, plus a quick completion checkbox.
+- **Editable task details** including the title, course, work type, due date, due time, and notes. Personal edits can be restored to the original imported values.
+- **PDF and DOCX syllabus processing** that extracts dated coursework into a review list before anything is added to the dashboard.
+- **A review workflow** for correcting extracted items, excluding unwanted items, marking optional work, and adding anything the syllabus parser missed.
+- **Multiple Canvas calendar connections** with saved source names, connection testing, manual course mapping, and calendar refresh information.
+- **Syllabus and Canvas merging** that avoids duplicate tasks. Canvas supplies the current due date, time, and assignment link when both sources describe the same item, while syllabus notes and task details are preserved.
+- **Private self-hosted storage** using Cloudflare D1 for course data and settings and a private R2 bucket for original syllabus files.
+
+## How the dashboard works
+
+1. You create a semester, add your courses, and choose a color for each class.
+2. You upload a syllabus for each course. Course Board privately stores the original file and extracts possible coursework.
+3. You review every extracted item, make corrections, exclude anything you do not want, and confirm the final list.
+4. You can optionally connect one or more Canvas calendar feeds. Course Board tests each feed, imports its events, and asks you to map any course it cannot identify confidently.
+5. Confirmed syllabus items and Canvas events are merged into the weekly dashboard. Your completion statuses, notes, and edits remain saved between visits.
+
 ## Prerequisites
 
 - A GitHub account
