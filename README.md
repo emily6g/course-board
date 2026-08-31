@@ -4,6 +4,8 @@ Course Board is a private, self-hosted semester dashboard. Upload PDF or DOCX sy
 
 Each copy uses its owner's Cloudflare Worker, D1 database, and private R2 bucket. It is intentionally a one-person app, so it does not include accounts or shared tenancy.
 
+<img width="1119" height="569" alt="image" src="https://github.com/user-attachments/assets/fb8aa00a-5ac6-4a79-858d-36f1720c5618" />
+
 ## What Course Board provides
 
 Course Board turns syllabi and Canvas calendar feeds into one personal semester workspace. The dashboard provides:
