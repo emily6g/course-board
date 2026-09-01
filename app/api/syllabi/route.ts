@@ -10,8 +10,10 @@ import {
 } from "../../../db/schema";
 import { extractDocumentText } from "../../../lib/syllabus/extractText";
 import { parseCoursework } from "../../../lib/syllabus/parseCoursework";
+import { chunkItems } from "../../../lib/db/chunkItems";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const CANDIDATE_INSERT_SIZE = 5;
 const allowedTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -108,15 +110,15 @@ export async function POST(request: Request) {
       );
     const parsed = parseCoursework(text, semester.startDate, semester.endDate);
     if (parsed.length) {
-      await db
-        .insert(taskCandidates)
-        .values(
-          parsed.map((candidate) => ({
+      for (const candidates of chunkItems(parsed, CANDIDATE_INSERT_SIZE)) {
+        await db.insert(taskCandidates).values(
+          candidates.map((candidate) => ({
             ...candidate,
             syllabusId: syllabus.id,
             courseId,
           })),
         );
+      }
     }
     await db
       .update(syllabi)
@@ -137,10 +139,15 @@ export async function POST(request: Request) {
       candidateCount: parsed.length,
     });
   } catch (error) {
+    await db
+      .delete(taskCandidates)
+      .where(eq(taskCandidates.syllabusId, syllabus.id));
     const message =
-      error instanceof Error
+      error instanceof Error &&
+      error.message ===
+        "No readable text was found. Scanned PDFs are not supported yet."
         ? error.message
-        : "The syllabus could not be processed.";
+        : "The syllabus was uploaded, but its coursework could not be processed. Remove it and try again with a text-based PDF or DOCX.";
     await db
       .update(syllabi)
       .set({ processingStatus: "failed", processingError: message })

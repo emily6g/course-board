@@ -8,6 +8,7 @@ import {
   semesters,
 } from "../../../db/schema";
 import { parseCalendar } from "../../../lib/ics";
+import { fetchCalendarText } from "../../../lib/canvas/fetchCalendar";
 
 export async function GET() {
   const db = getDb();
@@ -48,14 +49,9 @@ export async function GET() {
   );
   const results = await Promise.allSettled(
     sourceRows.map(async (source) => {
-      const url = new URL(source.feedUrl);
-      const response = await fetch(url, {
-        headers: { accept: "text/calendar" },
-        redirect: "error",
-      });
-      if (!response.ok) throw new Error("Calendar request failed");
-      const parsed = parseCalendar(await response.text(), {
-        allowedHosts: [url.hostname],
+      const calendar = await fetchCalendarText(source.feedUrl);
+      const parsed = parseCalendar(calendar.text, {
+        allowedHosts: calendar.allowedHosts,
         courses: knownCourses,
         semester,
         sourceKey: source.sourceKey,
