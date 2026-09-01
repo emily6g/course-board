@@ -15,8 +15,16 @@ function serialize(row: typeof taskCandidates.$inferSelect) {
     type: row.taskType,
     due: row.dueDate ?? "",
     dueTime: row.dueTime ?? "",
+    endTime: row.endTime ?? "",
     note: row.notes ?? "",
     optional: Boolean(row.optional),
+    tentative: Boolean(row.tentative),
+    derived: Boolean(row.derived),
+    needsReview: Boolean(row.needsReview),
+    reviewReason: row.reviewReason ?? undefined,
+    sourcePage: row.sourcePage ?? undefined,
+    sourceRow: row.sourceRow ?? undefined,
+    alternativeGroup: row.alternativeGroup ?? undefined,
     confidence: row.confidence / 100,
     sourceText: row.sourceText ?? "",
     status: row.status,
@@ -48,10 +56,10 @@ export async function POST(request: Request) {
     !Number.isInteger(syllabusId) ||
     !title ||
     !allowedTypes.has(taskType) ||
-    !isIsoDate(dueDate)
+    (dueDate !== "" && !isIsoDate(dueDate))
   ) {
     return Response.json(
-      { error: "Title, type, date, and syllabus are required." },
+      { error: "Title, work type, and syllabus are required. Add a date before confirming the item." },
       { status: 400 },
     );
   }
@@ -70,10 +78,14 @@ export async function POST(request: Request) {
       courseId: syllabus.courseId,
       title,
       taskType,
-      dueDate,
+      dueDate: dueDate || null,
       dueTime: typeof body.dueTime === "string" ? body.dueTime.trim() : null,
+      endTime: typeof body.endTime === "string" ? body.endTime.trim() : null,
       notes: typeof body.note === "string" ? body.note.trim() : null,
       optional: Boolean(body.optional),
+      tentative: Boolean(body.tentative),
+      needsReview: !dueDate || Boolean(body.needsReview),
+      reviewReason: !dueDate ? "Needs date confirmation" : null,
       confidence: 100,
       status: "pending",
     })
@@ -92,10 +104,10 @@ export async function PUT(request: Request) {
     !Number.isInteger(id) ||
     !title ||
     !allowedTypes.has(taskType) ||
-    !isIsoDate(dueDate)
+    (dueDate !== "" && !isIsoDate(dueDate))
   ) {
     return Response.json(
-      { error: "A valid title, work type, and date are required." },
+      { error: "A valid title and work type are required. Add a valid date before confirming." },
       { status: 400 },
     );
   }
@@ -104,10 +116,19 @@ export async function PUT(request: Request) {
     .set({
       title,
       taskType,
-      dueDate,
+      dueDate: dueDate || null,
       dueTime: typeof body.dueTime === "string" ? body.dueTime.trim() : null,
+      endTime: typeof body.endTime === "string" ? body.endTime.trim() : null,
       notes: typeof body.note === "string" ? body.note.trim() : null,
       optional: Boolean(body.optional),
+      tentative: Boolean(body.tentative),
+      needsReview: Boolean(body.needsReview) || !dueDate,
+      reviewReason:
+        Boolean(body.needsReview) || !dueDate
+          ? typeof body.reviewReason === "string"
+            ? body.reviewReason.trim()
+            : "Needs confirmation"
+          : null,
       status,
       updatedAt: new Date().toISOString(),
     })

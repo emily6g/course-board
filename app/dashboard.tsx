@@ -8,7 +8,7 @@ import { type Course, type SchoolTask, type Semester, type TaskType } from "../t
 
 type Status = "not-started" | "in-progress" | "done";
 type StatusMap = Record<string, Status>;
-type TaskOverride = Pick<SchoolTask, "courseId" | "title" | "type" | "due" | "dueTime" | "note"> & { taskId: string };
+type TaskOverride = Pick<SchoolTask, "courseId" | "title" | "type" | "due" | "dueTime" | "endTime" | "note" | "optional" | "tentative"> & { taskId: string };
 type OverrideMap = Record<string, TaskOverride>;
 type Syllabus = { id: string; courseId: string; filename: string; status: string; error?: string };
 
@@ -35,12 +35,30 @@ function dateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function dateKeyInTimezone(date: Date, timezone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch {
+    return dateKey(date);
+  }
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", weekday: "short" }).format(localDate(value));
 }
 
 function semesterWeekRange(week: number, semesterStartDate: string) {
   const semesterStart = localDate(semesterStartDate);
+  semesterStart.setDate(
+    semesterStart.getDate() - ((semesterStart.getDay() + 6) % 7),
+  );
 
   const start = new Date(semesterStart);
   start.setDate(start.getDate() + (week - 1) * 7);
@@ -71,14 +89,12 @@ function compareTasks(a: SchoolTask, b: SchoolTask) {
   return a.due.localeCompare(b.due) || startTimeMinutes(a.dueTime) - startTimeMinutes(b.dueTime) || a.title.localeCompare(b.title);
 }
 
-function weekBounds(now: Date) {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+function weekDateBounds(today: string) {
+  const value = new Date(`${today}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
+  const start = value.toISOString().slice(0, 10);
+  value.setUTCDate(value.getUTCDate() + 6);
+  return { start, end: value.toISOString().slice(0, 10) };
 }
 
 function taskCourse(task: SchoolTask, availableCourses: Course[]) {
@@ -88,7 +104,7 @@ function taskCourse(task: SchoolTask, availableCourses: Course[]) {
 function applyOverrides(baseTasks: SchoolTask[], overrides: OverrideMap) {
   return baseTasks.map((task) => {
     const override = overrides[task.id];
-    return override ? { ...task, ...override, dueTime: override.dueTime || undefined, note: override.note || undefined } : task;
+    return override ? { ...task, ...override, dueTime: override.dueTime || undefined, endTime: override.endTime || undefined, note: override.note || undefined } : task;
   });
 }
 
@@ -120,6 +136,7 @@ export default function Dashboard() {
   const [canvasConnected, setCanvasConnected] = useState<boolean | null>(null);
   const [calendarSourceCount, setCalendarSourceCount] = useState(0);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [calendarRefreshErrors, setCalendarRefreshErrors] = useState<string[]>([]);
   const [overrides, setOverrides] = useState<OverrideMap>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TaskOverride | null>(null);
@@ -206,7 +223,7 @@ export default function Dashboard() {
       try {
         const response = await fetch("/api/calendar", { cache: "no-store" });
         if (!response.ok) throw new Error("Calendar unavailable");
-        const data = await response.json() as { connected: boolean; sourceCount?: number; syncedAt?: string; events?: SchoolTask[]; courses?: Course[]; unmatchedCourses?: string[] };
+        const data = await response.json() as { connected: boolean; sourceCount?: number; syncedAt?: string; events?: SchoolTask[]; courses?: Course[]; unmatchedCourses?: string[]; sourceErrors?: Array<{ error?: string }> };
         if (!active) return;
         setCalendarTasks(data.events ?? []);
         setCalendarCourses(data.courses ?? []);
@@ -214,6 +231,7 @@ export default function Dashboard() {
         setCalendarSourceCount(data.sourceCount ?? 0);
         setLastSynced(data.syncedAt ?? null);
         setUnmatchedCourses(data.unmatchedCourses ?? []);
+        setCalendarRefreshErrors((data.sourceErrors ?? []).flatMap((item) => item.error ? [item.error] : []));
       } catch {
         if (active) setCanvasConnected(false);
       }
@@ -294,6 +312,9 @@ export default function Dashboard() {
       due: task.due,
       dueTime: task.dueTime ?? "",
       note: task.note ?? "",
+      endTime: task.endTime ?? "",
+      optional: Boolean(task.optional),
+      tentative: Boolean(task.tentative),
     });
     setEditError("");
   }
@@ -360,19 +381,22 @@ export default function Dashboard() {
     [baseCourses, calendarCourses]
   );
   const allTasks = useMemo(
-    () => applyOverrides(mergeTasks(baseTasks, calendarTasks), overrides),
+    () => {
+      const storedCanvas = baseTasks.filter((task) => task.source === "canvas");
+      const currentCanvas = calendarTasks.length ? calendarTasks : storedCanvas;
+      const sourceTasks = baseTasks.filter((task) => task.source !== "canvas" && !task.cancelled);
+      return applyOverrides(mergeTasks(sourceTasks, currentCanvas.filter((task) => !task.cancelled)), overrides);
+    },
     [baseTasks, calendarTasks, overrides]
   );
   const sortedTasks = useMemo(() => [...allTasks].sort(compareTasks), [allTasks]);
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
-  const today = dateKey(now);
-  const { start, end } = weekBounds(now);
+  const today = dateKeyInTimezone(now, timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const { start, end } = weekDateBounds(today);
   const activeTasks = sortedTasks.filter((task) => (statuses[task.id] ?? "not-started") !== "done");
-  const dueToday = activeTasks.filter((task) => task.due === today);
-  const dueThisWeek = activeTasks.filter((task) => {
-    const due = localDate(task.due);
-    return due >= start && due <= end;
-  });
+  const requiredActiveTasks = activeTasks.filter((task) => !task.optional);
+  const dueToday = requiredActiveTasks.filter((task) => task.due === today);
+  const dueThisWeek = requiredActiveTasks.filter((task) => task.due !== today && task.due >= start && task.due <= end);
   const nextTask = activeTasks.find((task) => localDate(task.due) >= localDate(today));
   const filteredTasks = useMemo(
     () => sortedTasks.filter((task) => {
@@ -589,6 +613,7 @@ export default function Dashboard() {
             <p>{canvasConnected ? `${calendarSourceCount} Canvas calendars connected` : canvasConnected === null ? "Connecting to Canvas" : "Canvas refresh unavailable"}</p>
             <span>Syllabus dates are merged with Canvas. When both list the same item, Canvas takes priority.</span>
             {lastSynced && <small>Refreshed {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(lastSynced))}</small>}
+            {!!calendarRefreshErrors.length && <small className="warning-text">Cached tasks remain visible. {calendarRefreshErrors.length} calendar refresh failed.</small>}
           </div>
         </aside>
 
@@ -632,8 +657,9 @@ export default function Dashboard() {
                             <h4>{task.url ? <a href={task.url} target="_blank" rel="noreferrer">{task.title}</a> : task.title}</h4>
                             {(task.source === "canvas" || task.source === "merged") && <span className="canvas-badge">{task.source === "merged" ? "Syllabus + Canvas" : "Canvas"}</span>}
                             {task.tentative && <span className="tentative-badge">Tentative</span>}{task.optional && <span className="optional-badge">Optional</span>}
+                            {task.sourceChanged && <span className="tentative-badge">Canvas updated date</span>}
                           </div>
-                          <p><span className="course-chip">{course.code}</span> {typeLabels[task.type]}{task.dueTime ? ` · ${task.dueTime}` : ""}</p>
+                          <p><span className="course-chip">{course.code}</span> {typeLabels[task.type]}{task.dueTime ? ` · ${task.dueTime}${task.endTime ? `–${task.endTime}` : ""}` : " · Time not specified"}</p>
                           {task.note && <span className="task-note">{task.note}</span>}
                         </div>
                         <select className={`status-select ${status}`} value={status} onChange={(event) => updateStatus(task.id, event.target.value as Status)} disabled={saving === task.id} aria-label={`Status for ${task.title}`}>
@@ -662,6 +688,9 @@ export default function Dashboard() {
               <label>Work type<select value={editDraft.type} onChange={(event) => setEditDraft({ ...editDraft, type: event.target.value as TaskType })}>{Object.entries(typeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
               <label>Due date<input required type="date" value={editDraft.due} onChange={(event) => setEditDraft({ ...editDraft, due: event.target.value })} /></label>
               <label>Due time<input placeholder="Example, 11:59 PM" value={editDraft.dueTime ?? ""} onChange={(event) => setEditDraft({ ...editDraft, dueTime: event.target.value })} /></label>
+              <label>End time<input placeholder="Example, 10:00 AM" value={editDraft.endTime ?? ""} onChange={(event) => setEditDraft({ ...editDraft, endTime: event.target.value })} /></label>
+              <label><input type="checkbox" checked={Boolean(editDraft.optional)} onChange={(event) => setEditDraft({ ...editDraft, optional: event.target.checked })} /> Optional</label>
+              <label><input type="checkbox" checked={Boolean(editDraft.tentative)} onChange={(event) => setEditDraft({ ...editDraft, tentative: event.target.checked })} /> Tentative</label>
               <label className="wide-field">Notes<textarea rows={4} placeholder="Add reminders, instructions, study topics, or anything else" value={editDraft.note ?? ""} onChange={(event) => setEditDraft({ ...editDraft, note: event.target.value })} /></label>
               {editError && <p className="edit-error" role="alert">{editError}</p>}
               <div className="edit-actions">

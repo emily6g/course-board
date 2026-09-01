@@ -45,8 +45,13 @@ export async function POST(request: Request) {
         typeof body.dueTime === "string" && body.dueTime.trim()
           ? body.dueTime.trim()
           : null,
+      endTime:
+        typeof body.endTime === "string" && body.endTime.trim()
+          ? body.endTime.trim()
+          : null,
       source: "manual",
       optional: Boolean(body.optional),
+      tentative: Boolean(body.tentative),
       notes:
         typeof body.note === "string" && body.note.trim()
           ? body.note.trim()
@@ -65,7 +70,10 @@ export async function POST(request: Request) {
       type: task.taskType,
       due: task.dueDate,
       dueTime: task.startTime ?? undefined,
+      endTime: task.endTime ?? undefined,
       note: task.notes ?? undefined,
+      optional: Boolean(task.optional),
+      tentative: Boolean(task.tentative),
       source: task.source,
     },
   });

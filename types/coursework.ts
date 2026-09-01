@@ -28,12 +28,21 @@ export type SchoolTask = {
   type: TaskType;
   due: string;
   dueTime?: string;
+  endTime?: string;
   note?: string;
   tentative?: boolean;
   optional?: boolean;
+  derived?: boolean;
+  needsReview?: boolean;
+  cancelled?: boolean;
+  allDay?: boolean;
   source?: TaskSource;
+  sourceKey?: string;
   sourceEventId?: string;
   url?: string;
+  originalData?: string;
+  lastSeenAt?: string;
+  sourceChanged?: boolean;
 };
 
 export type Semester = {
@@ -51,8 +60,16 @@ export type TaskCandidate = {
   type: TaskType;
   due: string;
   dueTime?: string;
+  endTime?: string;
   note?: string;
   optional: boolean;
+  tentative?: boolean;
+  derived?: boolean;
+  needsReview?: boolean;
+  reviewReason?: string;
+  sourcePage?: number;
+  sourceRow?: number;
+  alternativeGroup?: string;
   confidence: number;
   sourceText?: string;
   status: "pending" | "confirmed" | "rejected";

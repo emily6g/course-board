@@ -8,7 +8,7 @@ import {
   taskCandidates,
   tasks,
 } from "../../../db/schema";
-import { extractDocumentText } from "../../../lib/syllabus/extractText";
+import { extractDocument } from "../../../lib/syllabus/extractText";
 import { parseCoursework } from "../../../lib/syllabus/parseCoursework";
 import { chunkItems } from "../../../lib/db/chunkItems";
 
@@ -17,6 +17,7 @@ const CANDIDATE_INSERT_SIZE = 5;
 const allowedTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
 ]);
 
 function safeFilename(value: string) {
@@ -60,10 +61,10 @@ export async function POST(request: Request) {
     !file.size ||
     file.size > MAX_FILE_SIZE ||
     !allowedTypes.has(file.type) ||
-    !["pdf", "docx"].includes(extension ?? "")
+    !["pdf", "docx", "txt"].includes(extension ?? "")
   ) {
     return Response.json(
-      { error: "Upload a non-empty PDF or DOCX file up to 20 MB." },
+      { error: "Upload a non-empty PDF, DOCX, or TXT file up to 20 MB." },
       { status: 400 },
     );
   }
@@ -88,7 +89,11 @@ export async function POST(request: Request) {
   const bytes = await file.arrayBuffer();
   await env.SYLLABI.put(fileKey, bytes, {
     httpMetadata: { contentType: file.type },
-    customMetadata: { originalFilename: file.name },
+    customMetadata: {
+      originalFilename: file.name,
+      uploadedAt: new Date().toISOString(),
+      mimeType: file.type,
+    },
   });
   const [syllabus] = await db
     .insert(syllabi)
@@ -103,12 +108,16 @@ export async function POST(request: Request) {
     .returning();
 
   try {
-    const text = await extractDocumentText(bytes, file.type, file.name);
-    if (!text.trim())
+    const document = await extractDocument(bytes, file.type, file.name);
+    if (!document.text.trim())
       throw new Error(
         "No readable text was found. Scanned PDFs are not supported yet.",
       );
-    const parsed = parseCoursework(text, semester.startDate, semester.endDate);
+    const parsed = parseCoursework(
+      document.pages.join("\n\f\n"),
+      semester.startDate,
+      semester.endDate,
+    );
     if (parsed.length) {
       for (const candidates of chunkItems(parsed, CANDIDATE_INSERT_SIZE)) {
         await db.insert(taskCandidates).values(
@@ -126,7 +135,7 @@ export async function POST(request: Request) {
         processingStatus: "review",
         processingError: parsed.length
           ? null
-          : "No dated coursework was found. Add items manually on the review screen.",
+          : "No actionable coursework was found. Add items manually on the review screen.",
       })
       .where(eq(syllabi.id, syllabus.id));
     return Response.json({
