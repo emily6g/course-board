@@ -1,6 +1,6 @@
 # Course Board
 
-Course Board is a private, self-hosted semester dashboard. Upload PDF or DOCX syllabi, review the coursework it extracts, optionally connect one or more Canvas calendar feeds, and track everything in one weekly view.
+Course Board is a private, self-hosted semester dashboard. Upload PDF, DOCX, or TXT syllabi, review the coursework it extracts, optionally connect one or more Canvas calendar feeds, and track everything in one weekly view.
 
 Each copy uses its owner's Cloudflare Worker, D1 database, and private R2 bucket. It is intentionally a one-person app, so it does not include accounts or shared tenancy.
 
@@ -15,7 +15,7 @@ Course Board turns syllabi and Canvas calendar feeds into one personal semester 
 - **Course colors and filters** for viewing one class, all classes, a specific work type, or completed coursework.
 - **Progress tracking** with not started, in progress, and done statuses, plus a quick completion checkbox.
 - **Editable task details** including the title, course, work type, due date, due time, and notes. Personal edits can be restored to the original imported values.
-- **PDF and DOCX syllabus processing** that extracts dated coursework into a review list before anything is added to the dashboard.
+- **PDF, DOCX, and TXT syllabus processing** that extracts coursework into a review list before anything is added to the dashboard.
 - **A review workflow** for correcting extracted items, excluding unwanted items, marking optional work, and adding anything the syllabus parser missed.
 - **Manual coursework entry** for adding an assignment, quiz, exam, project, reading, or other item even when a syllabus has no detailed schedule.
 - **Multiple Canvas calendar connections** with saved source names, connection testing, manual course mapping, and calendar refresh information.
@@ -29,6 +29,8 @@ Course Board turns syllabi and Canvas calendar feeds into one personal semester 
 3. You review every extracted item, make corrections, exclude anything you do not want, and confirm the final list.
 4. You can optionally connect one or more Canvas calendar feeds, including feeds from different schools or Canvas accounts. Course Board tests each feed, imports its events, and asks you to map any course it cannot identify confidently.
 5. Confirmed syllabus items and Canvas events are merged into the weekly dashboard. Your completion statuses, notes, and edits remain saved between visits.
+
+The complete extraction, validation, refresh, and merge behavior is documented in [docs/EXTRACTION_PIPELINE.md](docs/EXTRACTION_PIPELINE.md).
 
 ## Prerequisites
 
@@ -93,9 +95,9 @@ If a Canvas course cannot be matched confidently, Course Board asks you to map i
 
 ## How coursework is handled
 
-Original syllabus files remain private in R2. Course Board extracts text using a serverless PDF parser or DOCX parser, then uses deterministic date and task rules to create candidates. Candidates never become dashboard tasks until you review and confirm them.
+Original syllabus files remain private in R2. Course Board preserves PDF page boundaries and source rows, then uses deterministic date and task rules to create candidates. Candidates never become dashboard tasks until you review and confirm them. Ambiguous, inferred, alternative, tentative, and undated items are visibly flagged and cannot be published until reviewed.
 
-Canvas dates take priority when Canvas and a syllabus contain the same course item. Syllabus notes, type, and optional status are kept. Statuses and personal edits remain in D1.
+Canvas events are stored by calendar source and UID. Failed refreshes keep cached tasks visible, changed deadlines are recorded, explicit cancellations are honored, and events are archived only after three successful omissions. Canvas dates take priority when strong evidence identifies the same syllabus item. Syllabus notes and optional status are kept. Statuses and personal edits remain in D1.
 
 Scanned image-only PDFs need OCR and are not currently supported. If extraction finds no dated items, use **Add missing item** during review.
 

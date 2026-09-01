@@ -21,6 +21,11 @@ type CanvasSource = {
   name: string;
   lastSyncedAt?: string | null;
   syncStatus?: string | null;
+  institution?: string | null;
+  courseRestrictions?: string[];
+  lastAttemptAt?: string | null;
+  error?: string | null;
+  maskedUrl?: string;
 };
 
 export default function SetupPanel({
@@ -54,7 +59,10 @@ export default function SetupPanel({
   const [manualType, setManualType] = useState<TaskType>("homework");
   const [manualDue, setManualDue] = useState(semester.startDate);
   const [manualDueTime, setManualDueTime] = useState("");
+  const [manualEndTime, setManualEndTime] = useState("");
   const [manualNote, setManualNote] = useState("");
+  const [manualOptional, setManualOptional] = useState(false);
+  const [manualTentative, setManualTentative] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [reviewing, setReviewing] = useState<Syllabus | null>(null);
@@ -63,6 +71,7 @@ export default function SetupPanel({
   const [sources, setSources] = useState<CanvasSource[]>([]);
   const [canvasName, setCanvasName] = useState("");
   const [canvasUrl, setCanvasUrl] = useState("");
+  const [canvasRestrictions, setCanvasRestrictions] = useState("");
   const [nameDraft, setNameDraft] = useState(displayName);
   const [semesterNameDraft, setSemesterNameDraft] = useState(semester.name);
   const [semesterStartDraft, setSemesterStartDraft] = useState(
@@ -198,13 +207,19 @@ export default function SetupPanel({
         body: JSON.stringify({
           semesterId: semester.id,
           name: canvasName,
+          institution: canvasName,
           feedUrl: canvasUrl,
+          courseRestrictions: canvasRestrictions
+            .split(",")
+            .map((code) => code.trim())
+            .filter(Boolean),
         }),
       })) as { source?: CanvasSource };
       if (data.source)
         setSources((current) => [...current, data.source as CanvasSource]);
       setCanvasName("");
       setCanvasUrl("");
+      setCanvasRestrictions("");
       setMessage("Canvas calendar connected. You can add another one below.");
     } catch {}
   }
@@ -221,7 +236,10 @@ export default function SetupPanel({
           type: manualType,
           due: manualDue,
           dueTime: manualDueTime,
+          endTime: manualEndTime,
           note: manualNote,
+          optional: manualOptional,
+          tentative: manualTentative,
         }),
       });
       window.location.reload();
@@ -451,7 +469,7 @@ export default function SetupPanel({
                       required
                       name="file"
                       type="file"
-                      accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                       onChange={(event) =>
                         setSelectedFiles((current) => ({
                           ...current,
@@ -463,7 +481,7 @@ export default function SetupPanel({
                       className="file-picker-button"
                       htmlFor={`syllabus-file-${course.id}`}
                     >
-                      {selectedFiles[course.id] || "Choose PDF or DOCX"}
+                      {selectedFiles[course.id] || "Choose PDF, DOCX, or TXT"}
                     </label>
                     <button disabled={saving}>Upload syllabus</button>
                   </form>
@@ -534,6 +552,16 @@ export default function SetupPanel({
                     onChange={(event) => setManualDueTime(event.target.value)}
                   />
                 </label>
+                <label>
+                  End time, optional
+                  <input
+                    placeholder="10:00 AM"
+                    value={manualEndTime}
+                    onChange={(event) => setManualEndTime(event.target.value)}
+                  />
+                </label>
+                <label><input type="checkbox" checked={manualOptional} onChange={(event) => setManualOptional(event.target.checked)} /> Optional</label>
+                <label><input type="checkbox" checked={manualTentative} onChange={(event) => setManualTentative(event.target.checked)} /> Tentative</label>
                 <label className="manual-note-field">
                   Notes, optional
                   <textarea
@@ -561,7 +589,9 @@ export default function SetupPanel({
             <div className="progress-row" key={source.id}>
               <div>
                 <strong>{source.name}</strong>
-                <small>Connected feed ••••••</small>
+                <small>{source.maskedUrl ?? "Protected Canvas feed"}</small>
+                <small>{source.syncStatus === "error" ? "Refresh failed, cached tasks kept" : source.lastSyncedAt ? `Last refreshed ${new Date(source.lastSyncedAt).toLocaleString()}` : "Connected, awaiting first refresh"}</small>
+                {source.error && <small className="warning-text">{source.error}</small>}
               </div>
               <button
                 className="text-button"
@@ -612,6 +642,15 @@ export default function SetupPanel({
                 value={canvasUrl}
                 onChange={(e) => setCanvasUrl(e.target.value)}
               />
+            </label>
+            <label>
+              Limit this feed to course codes, optional
+              <input
+                placeholder="HIST 1302, CSCE 435"
+                value={canvasRestrictions}
+                onChange={(event) => setCanvasRestrictions(event.target.value)}
+              />
+              <small>Separate course codes with commas. Leave blank to use all configured courses.</small>
             </label>
             <button disabled={saving}>
               {sources.length ? "Add another Canvas calendar" : "Test and connect"}
@@ -799,6 +838,30 @@ export default function SetupPanel({
                         )
                       }
                     />
+                    <input
+                      aria-label="End time"
+                      placeholder="10:00 AM"
+                      value={candidate.endTime ?? ""}
+                      onChange={(e) =>
+                        setCandidates((rows) =>
+                          rows.map((row, i) =>
+                            i === index ? { ...row, endTime: e.target.value } : row,
+                          ),
+                        )
+                      }
+                    />
+                    <input
+                      aria-label="Notes"
+                      placeholder="Instructions or extraction context"
+                      value={candidate.note ?? ""}
+                      onChange={(e) =>
+                        setCandidates((rows) =>
+                          rows.map((row, i) =>
+                            i === index ? { ...row, note: e.target.value } : row,
+                          ),
+                        )
+                      }
+                    />
                     <label>
                       <input
                         type="checkbox"
@@ -815,6 +878,32 @@ export default function SetupPanel({
                       />{" "}
                       Optional
                     </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(candidate.tentative)}
+                        onChange={(e) =>
+                          setCandidates((rows) =>
+                            rows.map((row, i) =>
+                              i === index ? { ...row, tentative: e.target.checked } : row,
+                            ),
+                          )
+                        }
+                      /> Tentative
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={!candidate.needsReview}
+                        onChange={(e) =>
+                          setCandidates((rows) =>
+                            rows.map((row, i) =>
+                              i === index ? { ...row, needsReview: !e.target.checked } : row,
+                            ),
+                          )
+                        }
+                      /> Reviewed and correct
+                    </label>
                     <button
                       className="secondary-button"
                       onClick={() => updateCandidate(candidate)}
@@ -822,9 +911,10 @@ export default function SetupPanel({
                       Save item
                     </button>
                   </div>
-                  {candidate.confidence < 0.75 && (
-                    <span className="confidence-warning">Low confidence</span>
+                  {(candidate.needsReview || candidate.confidence < 0.75) && (
+                    <span className="confidence-warning">{candidate.reviewReason ?? "Low confidence, review before publishing"}</span>
                   )}
+                  {(candidate.sourcePage || candidate.sourceRow) && <small>Source, page {candidate.sourcePage ?? "?"}, row {candidate.sourceRow ?? "?"}</small>}
                 </article>
               ))}
             </div>

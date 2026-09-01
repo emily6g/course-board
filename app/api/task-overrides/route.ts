@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { taskOverrides } from "../../../db/schema";
+import { taskTypes } from "../../../types/coursework";
 
-const allowedTypes = new Set(["homework", "quiz", "exam", "project", "reflection", "presentation", "discussion", "reading"]);
+const allowedTypes = new Set<string>(taskTypes);
 
 export async function GET() {
   try {
@@ -22,7 +23,10 @@ export async function PUT(request: Request) {
       type?: string;
       due?: string;
       dueTime?: string;
+      endTime?: string;
       note?: string;
+      optional?: boolean;
+      tentative?: boolean;
     };
     const taskId = payload.taskId?.trim() ?? "";
     const courseId = payload.courseId?.trim() ?? "";
@@ -30,16 +34,19 @@ export async function PUT(request: Request) {
     const type = payload.type?.trim() ?? "";
     const due = payload.due?.trim() ?? "";
     const dueTime = payload.dueTime?.trim() ?? "";
+    const endTime = payload.endTime?.trim() ?? "";
     const note = payload.note?.trim() ?? "";
+    const optional = Boolean(payload.optional);
+    const tentative = Boolean(payload.tentative);
     if (!taskId || !courseId || !title || !allowedTypes.has(type) || !/^\d{4}-\d{2}-\d{2}$/.test(due)) {
       return Response.json({ error: "A name, class, work type, and valid due date are required." }, { status: 400 });
     }
 
     const db = getDb();
-    const values = { taskId, courseId, title, type, due, dueTime, note, updatedAt: new Date() };
+    const values = { taskId, courseId, title, type, due, dueTime, endTime, note, optional, tentative, updatedAt: new Date() };
     await db.insert(taskOverrides).values(values).onConflictDoUpdate({
       target: taskOverrides.taskId,
-      set: { courseId, title, type, due, dueTime, note, updatedAt: new Date() },
+      set: { courseId, title, type, due, dueTime, endTime, note, optional, tentative, updatedAt: new Date() },
     });
     const [saved] = await db.select().from(taskOverrides).where(eq(taskOverrides.taskId, taskId)).limit(1);
     return Response.json({ override: saved });

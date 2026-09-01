@@ -21,6 +21,20 @@ export async function POST(request: Request) {
     .select()
     .from(taskCandidates)
     .where(eq(taskCandidates.syllabusId, syllabusId));
+  const unresolved = candidates.filter(
+    (candidate) =>
+      selectedIds.has(candidate.id) &&
+      (!candidate.dueDate || candidate.needsReview),
+  );
+  if (unresolved.length)
+    return Response.json(
+      {
+        error:
+          "Review every flagged item and add any missing date before publishing.",
+        unresolvedIds: unresolved.map((candidate) => String(candidate.id)),
+      },
+      { status: 409 },
+    );
   let inserted = 0;
 
   for (const candidate of candidates) {
@@ -53,14 +67,39 @@ export async function POST(request: Request) {
           taskType: candidate.taskType,
           dueDate: candidate.dueDate,
           startTime: candidate.dueTime,
+          endTime: candidate.endTime,
           source: "syllabus",
+          sourceKey: `syllabus-${syllabusId}`,
           sourceEventId,
+          originalData: candidate.originalData,
           optional: candidate.optional,
+          tentative: candidate.tentative,
+          derived: candidate.derived,
+          needsReview: false,
           notes: candidate.notes,
           confirmed: true,
           createdAt: new Date().toISOString(),
         });
       inserted += 1;
+    } else {
+      await db
+        .update(tasks)
+        .set({
+          courseId: candidate.courseId,
+          title: candidate.title,
+          taskType: candidate.taskType,
+          dueDate: candidate.dueDate,
+          startTime: candidate.dueTime,
+          endTime: candidate.endTime,
+          originalData: candidate.originalData,
+          optional: candidate.optional,
+          tentative: candidate.tentative,
+          derived: candidate.derived,
+          needsReview: false,
+          notes: candidate.notes,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(tasks.id, existing.id));
     }
     await db
       .update(taskCandidates)

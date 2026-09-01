@@ -206,3 +206,154 @@ test("syllabus candidates are split into D1-safe insert batches", () => {
   const chunks = chunkItems(Array.from({ length: 17 }, (_, index) => index), 5);
   assert.deepEqual(chunks.map((chunk) => chunk.length), [5, 5, 5, 2]);
 });
+
+test("assigned readings without official deadlines use a flagged derived date", () => {
+  const rows = parseCoursework(
+    "September 14 Read Chapter 4 before class",
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].dueDate, "2026-09-14");
+  assert.equal(rows[0].derived, false);
+
+  const scheduleRows = parseCoursework(
+    "September 14 Read Chapter 4",
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(scheduleRows[0].dueDate, "2026-09-13");
+  assert.equal(scheduleRows[0].derived, true);
+  assert.equal(scheduleRows[0].needsReview, true);
+  assert.match(scheduleRows[0].notes, /class meeting on 2026-09-14/);
+});
+
+test("TBD coursework remains in review without an invented date", () => {
+  const [row] = parseCoursework(
+    "Final Project Presentation, date TBD",
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(row.dueDate, null);
+  assert.equal(row.needsReview, true);
+  assert.match(row.reviewReason, /TBD|date confirmation/i);
+});
+
+test("syllabus parsing excludes exam reviews and uses specific task types", () => {
+  const rows = parseCoursework(
+    [
+      "Exam Review October 1",
+      "Final Project due October 2",
+      "Final Exam Presentation December 8, 8:00 to 10:00 AM",
+    ].join("\n"),
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].taskType, "project");
+  assert.equal(rows[1].taskType, "presentation");
+  assert.equal(rows[1].dueTime, "8:00 AM");
+  assert.equal(rows[1].endTime, "10:00 AM");
+});
+
+test("one schedule row creates separate tasks that share only its date", () => {
+  const rows = parseCoursework(
+    "October 3 Quiz 2 due; Project proposal due",
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.deepEqual(
+    rows.map(({ title, dueDate }) => ({ title, dueDate })),
+    [
+      { title: "Quiz 2", dueDate: "2026-10-03" },
+      { title: "Project proposal", dueDate: "2026-10-03" },
+    ],
+  );
+});
+
+test("alternative coursework is separate, optional, and requires review", () => {
+  const rows = parseCoursework(
+    "Choose either Project or Research Paper due October 5",
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.optional && row.needsReview));
+  assert.equal(rows[0].alternativeGroup, rows[1].alternativeGroup);
+});
+
+test("Canvas filters non-action events and preserves UID, metadata, and end time", () => {
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:office-1",
+    "DTSTART:20260901T150000Z",
+    "SUMMARY:Office Hours [CSCE 435]",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:presentation-1",
+    "DTSTART:20261208T140000Z",
+    "DTEND:20261208T160000Z",
+    "SUMMARY:CSCE 435: Final Exam Presentation [Fall 2026]",
+    "DESCRIPTION:<b>Required</b> presentation\\nBring slides",
+    "STATUS:CONFIRMED",
+    "SEQUENCE:2",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const result = parseCalendar(ics, {
+    allowedHosts: ["canvas.example.edu"],
+    courses: [{ id: "1", code: "CSCE 435", title: "Parallel Computing", color: "#000" }],
+    semester: { startDate: "2026-08-24", endDate: "2026-12-18" },
+    sourceKey: "tamu",
+    timezone: "America/Chicago",
+  });
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].sourceEventId, "presentation-1");
+  assert.equal(result.events[0].title, "Final Exam Presentation");
+  assert.equal(result.events[0].type, "presentation");
+  assert.equal(result.events[0].dueTime, "8:00 AM");
+  assert.equal(result.events[0].endTime, "10:00 AM");
+  assert.doesNotMatch(result.events[0].note, /<b>/);
+});
+
+test("Canvas preserves all-day events and explicit cancellations", () => {
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:quiz-1",
+    "DTSTART;VALUE=DATE:20260914",
+    "SUMMARY:Quiz 1 [MTDE 314]",
+    "STATUS:CANCELLED",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const result = parseCalendar(ics, {
+    allowedHosts: [],
+    courses: [{ id: "1", code: "MTDE 314", title: "Course", color: "#000" }],
+    semester: { startDate: "2026-08-24", endDate: "2026-12-18" },
+    sourceKey: "tamu",
+    timezone: "America/Chicago",
+  });
+  assert.equal(result.events[0].due, "2026-09-14");
+  assert.equal(result.events[0].dueTime, undefined);
+  assert.equal(result.events[0].allDay, true);
+  assert.equal(result.events[0].cancelled, true);
+});
+
+test("cross-source merging does not collapse different tasks on the same date", () => {
+  const syllabus = [{ id: "1", courseId: "10", title: "Project Proposal", type: "project", due: "2026-10-03", source: "syllabus" }];
+  const canvas = [{ id: "2", courseId: "10", title: "Project Presentation", type: "presentation", due: "2026-10-03", source: "canvas" }];
+  assert.equal(mergeTasks(syllabus, canvas).length, 2);
+});
+
+test("broken PDF title and date columns are flagged instead of guessed", () => {
+  const rows = parseCoursework(
+    "Quiz 2\nProject proposal\nOctober 3\nOctober 10",
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.dueDate === null && row.needsReview));
+  assert.ok(rows.every((row) => /without a reliable date relationship/i.test(row.reviewReason)));
+});

@@ -1,6 +1,11 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { canvasSources, semesters } from "../../../db/schema";
+import {
+  canvasSources,
+  semesters,
+  taskSourceHistory,
+  tasks,
+} from "../../../db/schema";
 import {
   fetchCalendarText,
   validCanvasUrl,
@@ -30,6 +35,19 @@ export async function GET() {
       connected: true,
       lastSyncedAt: row.lastSyncedAt,
       syncStatus: row.syncStatus,
+      institution: row.institution,
+      courseRestrictions: JSON.parse(row.courseRestrictions ?? "[]"),
+      lastAttemptAt: row.lastAttemptAt,
+      error: row.lastError,
+      maskedUrl: (() => {
+        try {
+          const url = new URL(row.feedUrl);
+          const tail = url.pathname.slice(-8);
+          return `${url.hostname}/feeds/...${tail}`;
+        } catch {
+          return "Protected Canvas feed";
+        }
+      })(),
     })),
   });
 }
@@ -38,6 +56,8 @@ export async function POST(request: Request) {
     semesterId?: string;
     name?: string;
     feedUrl?: string;
+    institution?: string;
+    courseRestrictions?: string[];
     testOnly?: boolean;
   };
   const semesterId = Number(body.semesterId);
@@ -75,6 +95,12 @@ export async function POST(request: Request) {
       sourceName: name,
       sourceKey,
       feedUrl,
+      institution: body.institution?.trim() || name,
+      courseRestrictions: JSON.stringify(
+        (body.courseRestrictions ?? [])
+          .map((code) => code.trim().toUpperCase())
+          .filter(Boolean),
+      ),
       syncStatus: "connected",
       createdAt: new Date().toISOString(),
     })
@@ -85,6 +111,8 @@ export async function POST(request: Request) {
       name: source.sourceName,
       sourceKey: source.sourceKey,
       connected: true,
+      institution: source.institution,
+      courseRestrictions: JSON.parse(source.courseRestrictions ?? "[]"),
     },
   });
 }
@@ -95,6 +123,23 @@ export async function DELETE(request: Request) {
       { error: "A valid source is required." },
       { status: 400 },
     );
-  await getDb().delete(canvasSources).where(eq(canvasSources.id, id));
+  const db = getDb();
+  const [source] = await db
+    .select()
+    .from(canvasSources)
+    .where(eq(canvasSources.id, id))
+    .limit(1);
+  if (!source)
+    return Response.json({ error: "Canvas source not found." }, { status: 404 });
+  const sourceTasks = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.sourceKey, source.sourceKey));
+  if (sourceTasks.length)
+    await db
+      .delete(taskSourceHistory)
+      .where(inArray(taskSourceHistory.taskId, sourceTasks.map((task) => task.id)));
+  await db.delete(tasks).where(eq(tasks.sourceKey, source.sourceKey));
+  await db.delete(canvasSources).where(eq(canvasSources.id, id));
   return Response.json({ deleted: true });
 }
