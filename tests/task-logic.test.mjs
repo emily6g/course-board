@@ -8,6 +8,11 @@ import {
 import { mergeTasks, normalizeTaskTitle } from "../lib/tasks/merge.ts";
 import { parseCoursework } from "../lib/syllabus/parseCoursework.ts";
 import { parseCalendar } from "../lib/ics.ts";
+import {
+  fetchCalendarText,
+  validCanvasUrl,
+} from "../lib/canvas/fetchCalendar.ts";
+import { chunkItems } from "../lib/db/chunkItems.ts";
 
 test("semester weeks start at one and advance every seven days", () => {
   assert.equal(semesterWeek("2026-08-24", "2026-08-24"), 1);
@@ -91,4 +96,49 @@ test("Canvas UTC dates use the semester timezone", () => {
   });
   assert.equal(result.events[0].due, "2026-09-04");
   assert.equal(result.events[0].dueTime, "11:59 PM");
+});
+
+test("Canvas feeds use edge-compatible manual redirects", async () => {
+  const calls = [];
+  const result = await fetchCalendarText(
+    "https://canvas.example.edu/calendar.ics",
+    async (input, init) => {
+      calls.push({ input: input.toString(), redirect: init?.redirect });
+      if (calls.length === 1)
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "https://files.canvas.example.edu/calendar.ics",
+          },
+        });
+      return new Response("BEGIN:VCALENDAR\nEND:VCALENDAR", { status: 200 });
+    },
+  );
+  assert.equal(calls[0].redirect, "manual");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(result.allowedHosts, [
+    "canvas.example.edu",
+    "files.canvas.example.edu",
+  ]);
+  assert.equal(validCanvasUrl("https://canvas.example.edu/calendar.ics"), true);
+  assert.equal(validCanvasUrl("http://canvas.example.edu/calendar.ics"), false);
+});
+
+test("Canvas feeds reject redirects to private addresses", async () => {
+  await assert.rejects(
+    fetchCalendarText(
+      "https://canvas.example.edu/calendar.ics",
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://127.0.0.1/calendar.ics" },
+        }),
+    ),
+    /unsafe address/,
+  );
+});
+
+test("syllabus candidates are split into D1-safe insert batches", () => {
+  const chunks = chunkItems(Array.from({ length: 17 }, (_, index) => index), 5);
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [5, 5, 5, 2]);
 });

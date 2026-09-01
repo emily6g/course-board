@@ -1,31 +1,13 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { canvasSources, semesters } from "../../../db/schema";
+import {
+  fetchCalendarText,
+  validCanvasUrl,
+} from "../../../lib/canvas/fetchCalendar";
 
-function validCanvasUrl(value: string) {
-  try {
-    const url = new URL(value);
-    const blocked =
-      /^(localhost|127\.|0\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i;
-    return (
-      url.protocol === "https:" &&
-      !url.username &&
-      !url.password &&
-      !blocked.test(url.hostname) &&
-      /\.ics(?:$|\?)/i.test(url.pathname + url.search)
-    );
-  } catch {
-    return false;
-  }
-}
 async function testFeed(feedUrl: string) {
-  const response = await fetch(feedUrl, {
-    headers: { accept: "text/calendar" },
-    redirect: "error",
-  });
-  const text = await response.text();
-  if (!response.ok || !/BEGIN:VCALENDAR/i.test(text))
-    throw new Error("Canvas did not return a valid calendar feed.");
+  await fetchCalendarText(feedUrl);
 }
 
 export async function GET() {
