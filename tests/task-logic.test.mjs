@@ -77,6 +77,70 @@ test("syllabus parsing accepts dated coursework and ignores policy text", () => 
   assert.equal(rows[1].taskType, "exam");
 });
 
+test("syllabus parsing removes points and due labels from coursework titles", () => {
+  const text = [
+    "Discussion One – 25 points – Due Aug. 28",
+    "Quiz One – points vary – Due Sept. 4",
+    "Midterm Exam – 100 points – Due Oct. 16",
+  ].join("\n");
+  const rows = parseCoursework(text, "2026-08-24", "2026-12-18");
+  assert.deepEqual(
+    rows.map(({ title, dueDate, taskType }) => ({ title, dueDate, taskType })),
+    [
+      { title: "Discussion One", dueDate: "2026-08-28", taskType: "discussion" },
+      { title: "Quiz One", dueDate: "2026-09-04", taskType: "quiz" },
+      { title: "Midterm Exam", dueDate: "2026-10-16", taskType: "exam" },
+    ],
+  );
+});
+
+test("syllabus parsing splits due-date summaries and removes detailed duplicates", () => {
+  const text = [
+    "Due Dates: Syllabus Agreement and Discussion One due Friday, August 28th; Quiz One due Friday, September 4th; Quiz Two due Friday, September 18th",
+    "Discussion One – 25 points – Due Aug. 28",
+    "Quiz One – points vary – Due Sept. 4",
+    "Quiz Two – points vary – Due Sept. 18",
+    "Due Dates: Artifact Analysis Assign. 1 due Friday, October 2nd; Discussion Two, Quiz Three & Midterm due Friday, October 16th",
+    "Artifact Analysis Assignment 1 – 50 points – Due Oct. 2",
+    "Discussion Two – 25 points – Due Oct. 16",
+    "Quiz Three – points vary – Due Oct. 16",
+    "Midterm Exam – 100 points – Due Oct. 16",
+  ].join("\n");
+  const rows = parseCoursework(text, "2026-08-24", "2026-12-18");
+
+  assert.equal(rows.filter((row) => row.title === "Quiz One").length, 1);
+  assert.equal(rows.filter((row) => /Artifact Analysis/i.test(row.title)).length, 1);
+  assert.equal(rows.filter((row) => /Midterm/i.test(row.title)).length, 1);
+  assert.deepEqual(
+    rows.map((row) => row.title),
+    [
+      "Syllabus Agreement",
+      "Discussion One",
+      "Quiz One",
+      "Quiz Two",
+      "Artifact Analysis Assignment 1",
+      "Discussion Two",
+      "Quiz Three",
+      "Midterm Exam",
+    ],
+  );
+});
+
+test("syllabus parsing assigns one shared summary date to each listed task", () => {
+  const text =
+    "Due Dates: Discussion Three, Quiz Four, Quiz Five; Artifact Analysis Assign. 2 due Friday, November 13th";
+  const rows = parseCoursework(text, "2026-08-24", "2026-12-18");
+  assert.deepEqual(
+    rows.map(({ title, dueDate }) => ({ title, dueDate })),
+    [
+      { title: "Discussion Three", dueDate: "2026-11-13" },
+      { title: "Quiz Four", dueDate: "2026-11-13" },
+      { title: "Quiz Five", dueDate: "2026-11-13" },
+      { title: "Artifact Analysis Assignment 2", dueDate: "2026-11-13" },
+    ],
+  );
+});
+
 test("Canvas UTC dates use the semester timezone", () => {
   const ics =
     "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:assignment-1\nDTSTART:20260905T045900Z\nSUMMARY:Homework 1 [CSCE 314]\nEND:VEVENT\nEND:VCALENDAR";
