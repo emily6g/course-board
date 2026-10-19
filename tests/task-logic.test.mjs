@@ -67,6 +67,12 @@ test("course matching uses one normalized course code and rejects ambiguity", ()
   assert.equal(matchCourse("General assignment", courses), null);
 });
 
+test("course matching does not attribute a longer code to its numeric prefix", () => {
+  const courses = [{ id: "1", code: "CSCE 104", title: "Intro", color: "#000000" }];
+  assert.equal(matchCourse("CSCE 1041 Assignment 3", courses), null);
+  assert.equal(matchCourse("CSCE 104 Assignment 3", courses)?.id, "1");
+});
+
 test("syllabus parsing accepts dated coursework and ignores policy text", () => {
   const text =
     "Homework 1 due September 4, 2026 at 11:59 PM\nAttendance policy applies every day\nExam 1 October 8, 2026";
