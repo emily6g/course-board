@@ -1,6 +1,6 @@
 # Course Board
 
-Course Board is a private, self-hosted semester dashboard. Upload PDF, DOCX, or TXT syllabi, review the coursework it extracts, optionally connect one or more Canvas calendar feeds, and track everything in one weekly view.
+Course Board is a private, self-hosted semester dashboard. Upload PDF, DOCX, or TXT syllabi to automatically populate your dashboard, optionally connect one or more Canvas calendar feeds, and track everything in one weekly view.
 
 Each copy uses its owner's Cloudflare Worker, D1 database, and private R2 bucket. It is intentionally a one-person app, so it does not include accounts or shared tenancy.
 
@@ -15,8 +15,8 @@ Course Board turns syllabi and Canvas calendar feeds into one personal semester 
 - **Course colors and filters** for viewing one class, all classes, a specific work type, or completed coursework.
 - **Progress tracking** with not started, in progress, and done statuses, plus a quick completion checkbox.
 - **Editable task details** including the title, course, work type, due date, due time, and notes. Personal edits can be restored to the original imported values.
-- **PDF, DOCX, and TXT syllabus processing** that extracts coursework into a review list before anything is added to the dashboard.
-- **A review workflow** for correcting extracted items, excluding unwanted items, marking optional work, and adding anything the syllabus parser missed.
+- **PDF, DOCX, and TXT syllabus processing** that automatically adds any assignment, quiz, exam, or project with a specific due date straight to the dashboard. Lines without a real date are dropped instead of guessed.
+- **A review screen** for correcting extracted items, excluding unwanted ones, marking optional work, and adding anything the syllabus parser missed. It is optional, not a gate; you can edit or delete any item directly from the dashboard at any time.
 - **Manual coursework entry** for adding an assignment, quiz, exam, project, reading, or other item even when a syllabus has no detailed schedule.
 - **Multiple Canvas calendar connections** with saved source names, connection testing, manual course mapping, and calendar refresh information.
 - **Syllabus and Canvas merging** that avoids duplicate tasks. Canvas supplies the current due date, time, and assignment link when both sources describe the same item, while syllabus notes and task details are preserved.
@@ -26,7 +26,7 @@ Course Board turns syllabi and Canvas calendar feeds into one personal semester 
 
 1. You create a semester, add your courses, and choose a color for each class.
 2. For each course, you can upload a syllabus, enter coursework yourself, or use both. Course Board privately stores uploaded files and extracts possible coursework.
-3. You review every extracted item, make corrections, exclude anything you do not want, and confirm the final list.
+3. Extracted coursework with a specific due date appears on your dashboard automatically. You can open the review screen to fix anything, or edit or delete items directly from the dashboard afterward.
 4. You can optionally connect one or more Canvas calendar feeds, including feeds from different schools or Canvas accounts. Course Board tests each feed, imports its events, and asks you to map any course it cannot identify confidently.
 5. Confirmed syllabus items and Canvas events are merged into the weekly dashboard. Your completion statuses, notes, and edits remain saved between visits.
 
@@ -80,10 +80,9 @@ Open the URL Wrangler prints. Course Board will guide you through:
 
 1. Entering semester dates
 2. Adding courses
-3. Uploading each syllabus
-4. Reviewing, correcting, excluding, or adding coursework
-5. Confirming items before they appear on the dashboard
-6. Connecting Canvas, if wanted
+3. Uploading each syllabus, which automatically populates your dashboard
+4. Optionally reviewing, correcting, excluding, or adding coursework
+5. Connecting Canvas, if wanted
 
 ## Canvas setup
 
@@ -95,11 +94,11 @@ If a Canvas course cannot be matched confidently, Course Board asks you to map i
 
 ## How coursework is handled
 
-Original syllabus files remain private in R2. Course Board preserves PDF page boundaries and source rows, then uses deterministic date and task rules to create candidates. Candidates never become dashboard tasks until you review and confirm them. Ambiguous, inferred, alternative, tentative, and undated items are visibly flagged and cannot be published until reviewed.
+Original syllabus files remain private in R2. Course Board preserves PDF page boundaries and source rows, then uses deterministic date and task rules to create candidates. A candidate is automatically published to the dashboard as soon as it resolves to a specific due date; a line that only looks actionable but has no reliable date is dropped instead of guessed. Alternative, tentative, and derived items are published too, each with an informational note, and can be edited or deleted from the dashboard at any time.
 
 Canvas events are stored by calendar source and UID. Failed refreshes keep cached tasks visible, changed deadlines are recorded, explicit cancellations are honored, and events are archived only after three successful omissions. Canvas dates take priority when strong evidence identifies the same syllabus item. Syllabus notes and optional status are kept. Statuses and personal edits remain in D1.
 
-Scanned image-only PDFs need OCR and are not currently supported. If extraction finds no dated items, use **Add missing item** during review.
+Scanned image-only PDFs need OCR and are not currently supported. If extraction finds no dated items, use **Add missing item** during review, or add the assignment manually from the setup screen.
 
 ## Local development
 

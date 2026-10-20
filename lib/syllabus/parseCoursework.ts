@@ -199,23 +199,28 @@ export function parseCoursework(text: string, semesterStart: string, semesterEnd
   }) {
     const title = cleanCourseworkTitle(input.title);
     if (!isActionable(title, Boolean(input.alternativeGroup))) return;
+    const outOfSemester = Boolean(input.dueDate && (input.dueDate < semesterStart || input.dueDate > semesterEnd));
+    const dueDate = outOfSemester ? null : input.dueDate;
+    // Only items with a specific, resolved due date are published. An
+    // actionable-looking line with no reliable date is prose or policy text,
+    // not real coursework, so it is dropped rather than guessed or flagged.
+    if (!dueDate) return;
     const optional = /\b(optional|extra credit|recommended|not required)\b/i.test(input.line) || Boolean(input.alternativeGroup);
     const tentative = /\b(tentative|may change|subject to change|TBD|to be determined)\b/i.test(input.line);
     const times = parseTimes(input.line);
-    const outOfSemester = Boolean(input.dueDate && (input.dueDate < semesterStart || input.dueDate > semesterEnd));
-    const mismatch = Boolean(input.dueDate && weekdayMismatch(input.line, input.dueDate));
-    const needsReview = Boolean(input.needsReview || !input.dueDate || outOfSemester || mismatch || input.alternativeGroup);
-    const reasons = [input.reviewReason, !input.dueDate ? "Needs date confirmation" : null, outOfSemester ? "Date is outside the selected semester" : null, mismatch ? "Weekday and date do not match" : null, input.alternativeGroup ? "Alternative coursework, confirm which option is required" : null].filter(Boolean);
+    const mismatch = weekdayMismatch(input.line, dueDate);
+    const needsReview = Boolean(input.needsReview || mismatch || input.alternativeGroup);
+    const reasons = [input.reviewReason, mismatch ? "Weekday and date do not match" : null, input.alternativeGroup ? "Alternative coursework, confirm which option is required" : null].filter(Boolean);
     const notes = [input.notes, optional ? (/extra credit/i.test(input.line) ? "Extra credit item" : "Optional or conditional item") : null, tentative ? "Tentative date from the syllabus. Confirm in Canvas or with the instructor." : null].filter(Boolean).join(" ") || null;
-    const key = `${normalizeCourseworkTitle(title)}|${input.dueDate ?? "undated"}`;
+    const key = `${normalizeCourseworkTitle(title)}|${dueDate}`;
     const candidate: ParsedCandidate = {
-      title, taskType: inferCourseworkType(title), dueDate: outOfSemester ? null : input.dueDate,
+      title, taskType: inferCourseworkType(title), dueDate,
       dueTime: times.dueTime, endTime: times.endTime, notes, optional, tentative,
       derived: Boolean(input.derived), needsReview, reviewReason: reasons.join("; ") || null,
       sourcePage: input.page, sourceRow: input.row,
       originalData: JSON.stringify({ page: input.page, row: input.row, text: input.line }),
       alternativeGroup: input.alternativeGroup ?? null,
-      confidence: Math.max(20, Math.min(98, input.quality - (needsReview ? 25 : 0))),
+      confidence: Math.max(20, Math.min(98, input.quality - (needsReview ? 15 : 0))),
       sourceText: input.line.slice(0, 500),
     };
     const existing = candidates.get(key);
@@ -226,7 +231,7 @@ export function parseCoursework(text: string, semesterStart: string, semesterEnd
   text.split(/\f/).forEach((pageText, pageIndex) => {
     const lines = pageText.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
     lines.forEach((line, rowIndex) => {
-      if (line.length > 600) return;
+      if (line.length > 300) return;
       const matches = dateMatches(line, semesterStart);
       const inSemester = matches.filter((item) => item.dueDate >= semesterStart && item.dueDate <= semesterEnd);
       if (inSemester.length && (/^\s*week\s+(?:of\s+)?/i.test(line) || /^\s*(?:mon|tue|wed|thu|fri|sat|sun)/i.test(line) || !actionPattern.test(line))) contextDate = inSemester[0].dueDate;
@@ -235,24 +240,15 @@ export function parseCoursework(text: string, semesterStart: string, semesterEnd
       const page = pageIndex + 1;
       const row = rowIndex + 1;
       const alternativeGroup = alternativeId(line, page, row);
-      if (/\b(?:TBD|to be determined)\b/i.test(line) && !matches.length) {
-        addCandidate({ title: line, dueDate: null, line, page, row, quality: 55, needsReview: true, reviewReason: "Syllabus lists this item as TBD", alternativeGroup });
-        return;
-      }
       const weekdayOnly = line.match(new RegExp(String.raw`\bdue\s+(?:on\s+)?(${weekdays.join("|")})\b`, "i"));
       if (!matches.length && weekdayOnly) {
         const dueDate = contextDate ? dateForWeekday(contextDate, weekdayOnly[1]) : null;
-        addCandidate({ title: line, dueDate, line, page, row, quality: dueDate ? 72 : 45, needsReview: true, reviewReason: dueDate ? "Date calculated from the containing schedule week" : "Weekday has no containing schedule date", alternativeGroup });
+        addCandidate({ title: line, dueDate, line, page, row, quality: 72, needsReview: true, reviewReason: "Date calculated from the containing schedule week", alternativeGroup });
         return;
       }
       if (!matches.length) {
-        if (/\b(before next class|before class)\b/i.test(line)) {
-          addCandidate({ title: line, dueDate: contextDate ? previousDay(contextDate) : null, line, page, row, quality: 45, derived: Boolean(contextDate), needsReview: true, reviewReason: "Deadline depends on class schedule", alternativeGroup });
-        } else {
-          const type = inferCourseworkType(line);
-          const assignedReading = type !== "reading" || /\b(read|required|pre-read|before class)\b/i.test(line);
-          if (assignedReading && isActionable(cleanCourseworkTitle(line)))
-            addCandidate({ title: line, dueDate: null, line, page, row, quality: 35, needsReview: true, reviewReason: "Actionable item found without a reliable date relationship. Confirm it against the original syllabus.", alternativeGroup });
+        if (/\b(before next class|before class)\b/i.test(line) && contextDate) {
+          addCandidate({ title: line, dueDate: previousDay(contextDate), line, page, row, quality: 45, derived: true, needsReview: true, reviewReason: "Deadline depends on class schedule", alternativeGroup });
         }
         return;
       }

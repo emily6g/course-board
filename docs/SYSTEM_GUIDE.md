@@ -6,9 +6,9 @@
 Private syllabus in R2
 -> server-side PDF or DOCX text extraction
 -> validated task_candidates in D1
--> user review and confirmation
+-> auto-publish once a specific due date is resolved
 -> tasks in D1
--> dashboard
+-> dashboard (editable or deletable per item afterward)
 
 Private Canvas feed URL in D1
 -> server-side ICS fetch and parsing
@@ -21,7 +21,7 @@ D1 is the source of truth for semesters, courses, confirmed syllabus tasks, Canv
 
 ## Safety boundaries
 
-- Candidate extraction cannot write directly to production tasks.
+- Candidate extraction cannot write directly to production tasks; it is staged in `task_candidates` first, then auto-published only once it resolves to a specific due date.
 - Confirmation uses a stable candidate source ID so retries do not create duplicates.
 - Canvas sources are masked in API responses and fetched only on the server.
 - R2 objects are private and never receive public URLs.

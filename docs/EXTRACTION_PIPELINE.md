@@ -7,13 +7,13 @@ Course Board treats syllabi, Canvas calendars, and manual entries as separate so
 1. PDF, DOCX, and TXT files are validated, stored privately in R2, and linked to the selected course.
 2. PDF page boundaries are preserved. Every candidate stores its original text, page number, and row number.
 3. Each text row is checked for actionable coursework. Gradeable tasks, required readings, deliverables, surveys, self-checks, and syllabus agreements are supported. Policy text, materials lists, and exam reviews without a submission are excluded.
-4. Schedule rows containing several tasks are split into separate candidates. Multi-date rows and broken table relationships are flagged instead of guessed.
-5. Dates use the configured semester year. Weekday-only deadlines use the containing schedule week and remain flagged for confirmation. TBD items remain undated.
+4. Schedule rows containing several tasks are split into separate candidates.
+5. Dates use the configured semester year. Weekday-only deadlines use the containing schedule week. An actionable-looking line with no reliable date relationship (no date on the line, an unresolvable weekday reference, an out-of-semester date, or a bare TBD) is dropped rather than guessed or published undated.
 6. Assigned readings without an official deadline use the prior calendar day and include a note identifying the class meeting and the derived nature of the date.
 7. Explicit time ranges preserve both start and end times. Missing times remain empty and display as “Time not specified.”
-8. Optional, alternative, tentative, inferred, date-mismatch, and low-confidence items are marked for review. Alternative choices share a group identifier and are not treated as independently required.
+8. Optional, alternative, tentative, inferred, and date-mismatch items are published with an informational note rather than being held back. Alternative choices share a group identifier and are not treated as independently required.
 9. Repeated syllabus mentions are normalized by title and date. A cleaner detailed row replaces a summary duplicate while useful notes are retained.
-10. Candidates are previewed before publishing. Flagged or undated candidates cannot be published until corrected and marked reviewed.
+10. Candidates are staged in `task_candidates`, then automatically published to the dashboard as soon as they resolve to a specific due date — no manual review or confirmation step is required. The student can still open the review screen at any time to edit a field or uncheck an item to remove it, and can edit or delete any item directly from the dashboard afterward.
 
 ## Canvas processing
 

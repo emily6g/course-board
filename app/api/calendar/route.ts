@@ -11,67 +11,10 @@ import {
 } from "../../../db/schema";
 import { parseCalendar } from "../../../lib/ics";
 import { fetchCalendarText } from "../../../lib/canvas/fetchCalendar";
+import { planCanvasSync } from "../../../lib/canvas/syncEvents";
 import type { SchoolTask } from "../../../types/coursework";
 
 const ARCHIVE_AFTER_MISSING_REFRESHES = 3;
-
-function taskPayload(event: SchoolTask, seenAt: string) {
-  let normalizedUtc: string | null = null;
-  try {
-    normalizedUtc = JSON.parse(event.originalData ?? "{}").normalizedUtc ?? null;
-  } catch {}
-  return {
-    courseId: Number(event.courseId),
-    title: event.title,
-    taskType: event.type,
-    dueDate: event.due,
-    startTime: event.dueTime ?? null,
-    endTime: event.endTime ?? null,
-    source: "canvas",
-    sourceKey: event.sourceKey ?? null,
-    sourceEventId: event.sourceEventId ?? null,
-    canvasUrl: event.url ?? null,
-    originalData: event.originalData ?? null,
-    normalizedUtc,
-    lastSeenAt: seenAt,
-    missingRefreshes: 0,
-    cancelled: Boolean(event.cancelled),
-    tentative: false,
-    derived: false,
-    needsReview: false,
-    assumedTime: false,
-    optional: Boolean(event.optional),
-    notes: event.note ?? null,
-    confirmed: true,
-    updatedAt: seenAt,
-  };
-}
-
-async function recordChanges(
-  taskId: number,
-  sourceKey: string,
-  existing: typeof tasks.$inferSelect,
-  next: ReturnType<typeof taskPayload>,
-) {
-  const tracked: Array<[keyof typeof existing, keyof typeof next, string]> = [
-    ["title", "title", "title"],
-    ["dueDate", "dueDate", "due_date"],
-    ["startTime", "startTime", "start_time"],
-    ["endTime", "endTime", "end_time"],
-    ["taskType", "taskType", "task_type"],
-    ["notes", "notes", "notes"],
-    ["canvasUrl", "canvasUrl", "source_url"],
-    ["cancelled", "cancelled", "cancelled"],
-  ];
-  const changes = tracked.flatMap(([oldKey, newKey, field]) => {
-    const oldValue = existing[oldKey];
-    const newValue = next[newKey];
-    return String(oldValue ?? "") === String(newValue ?? "")
-      ? []
-      : [{ taskId, sourceKey, field, oldValue: oldValue == null ? null : String(oldValue), newValue: newValue == null ? null : String(newValue), changedAt: next.updatedAt }];
-  });
-  if (changes.length) await getDb().insert(taskSourceHistory).values(changes);
-}
 
 async function syncSource(
   source: typeof canvasSources.$inferSelect,
@@ -101,44 +44,35 @@ async function syncSource(
       .select()
       .from(tasks)
       .where(and(eq(tasks.source, "canvas"), eq(tasks.sourceKey, source.sourceKey)));
-    const byUid = new Map(existing.map((task) => [task.sourceEventId, task]));
-    const seen = new Set<string>();
+    const plan = planCanvasSync(
+      parsed.events,
+      existing,
+      attemptedAt,
+      ARCHIVE_AFTER_MISSING_REFRESHES,
+    );
 
-    for (const event of parsed.events) {
-      if (!event.sourceEventId) continue;
-      seen.add(event.sourceEventId);
-      const values = taskPayload(event, attemptedAt);
-      const current = byUid.get(event.sourceEventId);
-      if (current) {
-        await recordChanges(current.id, source.sourceKey, current, values);
-        await db
-          .update(tasks)
-          .set(
-            current.dueDate !== values.dueDate && !current.originalDueDate
-              ? { ...values, originalDueDate: current.dueDate }
-              : values,
-          )
-          .where(eq(tasks.id, current.id));
-      } else {
-        await db.insert(tasks).values({
-          ...values,
-          originalDueDate: event.due,
-          createdAt: attemptedAt,
-        });
-      }
+    for (const { values, originalDueDate } of plan.toInsert) {
+      await db.insert(tasks).values({ ...values, originalDueDate, createdAt: attemptedAt });
     }
-
-    for (const current of existing) {
-      if (!current.sourceEventId || seen.has(current.sourceEventId) || current.cancelled) continue;
-      const missingRefreshes = current.missingRefreshes + 1;
+    for (const { id, values, changes } of plan.toUpdate) {
+      if (changes.length)
+        await db.insert(taskSourceHistory).values(
+          changes.map((change) => ({
+            taskId: id,
+            sourceKey: source.sourceKey,
+            field: change.field,
+            oldValue: change.oldValue,
+            newValue: change.newValue,
+            changedAt: attemptedAt,
+          })),
+        );
+      await db.update(tasks).set(values).where(eq(tasks.id, id));
+    }
+    for (const { id, missingRefreshes, cancelled } of plan.toArchive) {
       await db
         .update(tasks)
-        .set({
-          missingRefreshes,
-          cancelled: missingRefreshes >= ARCHIVE_AFTER_MISSING_REFRESHES,
-          updatedAt: attemptedAt,
-        })
-        .where(eq(tasks.id, current.id));
+        .set({ missingRefreshes, cancelled, updatedAt: attemptedAt })
+        .where(eq(tasks.id, id));
     }
 
     await db

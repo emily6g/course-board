@@ -12,6 +12,7 @@ import {
   fetchCalendarText,
   validCanvasUrl,
 } from "../lib/canvas/fetchCalendar.ts";
+import { planCanvasSync } from "../lib/canvas/syncEvents.ts";
 import { chunkItems } from "../lib/db/chunkItems.ts";
 
 test("semester weeks start at one and advance every seven days", () => {
@@ -55,6 +56,56 @@ test("Canvas updates a matching syllabus task without losing syllabus metadata",
   assert.equal(merged.note, "Read chapter 2");
   assert.equal(merged.optional, true);
   assert.equal(merged.source, "merged");
+});
+
+test("a terser syllabus title still matches Canvas's fuller restatement of it", () => {
+  const syllabus = [
+    {
+      id: "1",
+      courseId: "10",
+      title: "Homework 1",
+      type: "homework",
+      due: "2026-09-01",
+      source: "syllabus",
+    },
+  ];
+  const canvas = [
+    {
+      id: "canvas-1",
+      courseId: "10",
+      title: "Homework 1: Arrays and Loops",
+      type: "homework",
+      due: "2026-09-04",
+      source: "canvas",
+      sourceEventId: "uid-1",
+    },
+  ];
+  const merged = mergeTasks(syllabus, canvas);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].due, "2026-09-04");
+  assert.equal(merged[0].source, "merged");
+});
+
+test("a non-numbered syllabus title still matches Canvas's fuller restatement of it", () => {
+  const syllabus = [
+    { id: "1", courseId: "10", title: "Project Proposal", type: "project", due: "2026-10-02", source: "syllabus" },
+  ];
+  const canvas = [
+    { id: "canvas-1", courseId: "10", title: "Project Proposal: Submit via Turnitin", type: "project", due: "2026-10-03", source: "canvas", sourceEventId: "uid-1" },
+  ];
+  const merged = mergeTasks(syllabus, canvas);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].due, "2026-10-03");
+});
+
+test("same number but a different work type is never collapsed into one item", () => {
+  const syllabus = [
+    { id: "1", courseId: "10", title: "Quiz 1", type: "quiz", due: "2026-09-01", source: "syllabus" },
+  ];
+  const canvas = [
+    { id: "canvas-1", courseId: "10", title: "Homework 1", type: "homework", due: "2026-09-02", source: "canvas", sourceEventId: "uid-1" },
+  ];
+  assert.equal(mergeTasks(syllabus, canvas).length, 2);
 });
 
 test("course matching uses one normalized course code and rejects ambiguity", () => {
@@ -234,15 +285,13 @@ test("assigned readings without official deadlines use a flagged derived date", 
   assert.match(scheduleRows[0].notes, /class meeting on 2026-09-14/);
 });
 
-test("TBD coursework remains in review without an invented date", () => {
-  const [row] = parseCoursework(
+test("TBD coursework is dropped instead of inventing a date", () => {
+  const rows = parseCoursework(
     "Final Project Presentation, date TBD",
     "2026-08-24",
     "2026-12-18",
   );
-  assert.equal(row.dueDate, null);
-  assert.equal(row.needsReview, true);
-  assert.match(row.reviewReason, /TBD|date confirmation/i);
+  assert.equal(rows.length, 0);
 });
 
 test("syllabus parsing excludes exam reviews and uses specific task types", () => {
@@ -353,13 +402,73 @@ test("cross-source merging does not collapse different tasks on the same date", 
   assert.equal(mergeTasks(syllabus, canvas).length, 2);
 });
 
-test("broken PDF title and date columns are flagged instead of guessed", () => {
+test("broken PDF title and date columns are dropped instead of guessed", () => {
   const rows = parseCoursework(
     "Quiz 2\nProject proposal\nOctober 3\nOctober 10",
     "2026-08-24",
     "2026-12-18",
   );
-  assert.equal(rows.length, 2);
-  assert.ok(rows.every((row) => row.dueDate === null && row.needsReview));
-  assert.ok(rows.every((row) => /without a reliable date relationship/i.test(row.reviewReason)));
+  assert.equal(rows.length, 0);
+});
+
+test("prose with an action word but no date is not treated as coursework", () => {
+  const rows = parseCoursework(
+    [
+      "A survey of the social, political, and economic history of the exam period.",
+      "Paper and pen are required to take all exams in this course.",
+      "Final grades for the course will be posted according to university policy.",
+    ].join("\n"),
+    "2026-08-24",
+    "2026-12-18",
+  );
+  assert.equal(rows.length, 0);
+});
+
+test("a Canvas item posted after the last sync is inserted as new", () => {
+  const event = { sourceEventId: "uid-new", courseId: "10", title: "Lab 3", type: "homework", due: "2026-09-20", source: "canvas" };
+  const plan = planCanvasSync([event], [], "2026-09-10T00:00:00.000Z", 3);
+  assert.equal(plan.toInsert.length, 1);
+  assert.equal(plan.toUpdate.length, 0);
+  assert.equal(plan.toInsert[0].values.title, "Lab 3");
+  assert.equal(plan.toInsert[0].originalDueDate, "2026-09-20");
+});
+
+test("a Canvas item whose date changed is updated and the change is recorded", () => {
+  const event = { sourceEventId: "uid-1", courseId: "10", title: "Lab 1", type: "homework", due: "2026-09-25", source: "canvas" };
+  const existing = [{ id: 7, sourceEventId: "uid-1", dueDate: "2026-09-20", originalDueDate: null, missingRefreshes: 0, cancelled: false, title: "Lab 1", startTime: null, endTime: null, taskType: "homework", notes: null, canvasUrl: null }];
+  const plan = planCanvasSync([event], existing, "2026-09-22T00:00:00.000Z", 3);
+  assert.equal(plan.toInsert.length, 0);
+  assert.equal(plan.toUpdate.length, 1);
+  assert.equal(plan.toUpdate[0].id, 7);
+  assert.equal(plan.toUpdate[0].values.dueDate, "2026-09-25");
+  assert.equal(plan.toUpdate[0].values.originalDueDate, "2026-09-20");
+  assert.ok(plan.toUpdate[0].changes.some((change) => change.field === "due_date"));
+});
+
+test("a Canvas item missing from the feed is archived only after three misses, and reappearing resets it", () => {
+  const existing = [{ id: 9, sourceEventId: "uid-gone", dueDate: "2026-09-20", originalDueDate: null, missingRefreshes: 1, cancelled: false, title: "Quiz 4", startTime: null, endTime: null, taskType: "quiz", notes: null, canvasUrl: null }];
+  const missedAgain = planCanvasSync([], existing, "2026-09-23T00:00:00.000Z", 3);
+  assert.equal(missedAgain.toArchive.length, 1);
+  assert.equal(missedAgain.toArchive[0].missingRefreshes, 2);
+  assert.equal(missedAgain.toArchive[0].cancelled, false);
+
+  const stillMissing = [{ ...existing[0], missingRefreshes: 2 }];
+  const archived = planCanvasSync([], stillMissing, "2026-09-24T00:00:00.000Z", 3);
+  assert.equal(archived.toArchive[0].missingRefreshes, 3);
+  assert.equal(archived.toArchive[0].cancelled, true);
+
+  const reappeared = planCanvasSync(
+    [{ sourceEventId: "uid-gone", courseId: "10", title: "Quiz 4", type: "quiz", due: "2026-09-20", source: "canvas" }],
+    existing,
+    "2026-09-25T00:00:00.000Z",
+    3,
+  );
+  assert.equal(reappeared.toArchive.length, 0);
+  assert.equal(reappeared.toUpdate[0].values.missingRefreshes, 0);
+});
+
+test("a cancelled Canvas item is left alone instead of being re-archived", () => {
+  const existing = [{ id: 11, sourceEventId: "uid-cancelled", dueDate: "2026-09-20", originalDueDate: null, missingRefreshes: 3, cancelled: true, title: "Old Quiz", startTime: null, endTime: null, taskType: "quiz", notes: null, canvasUrl: null }];
+  const plan = planCanvasSync([], existing, "2026-09-26T00:00:00.000Z", 3);
+  assert.equal(plan.toArchive.length, 0);
 });

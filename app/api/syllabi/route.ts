@@ -11,6 +11,7 @@ import {
 import { extractDocument } from "../../../lib/syllabus/extractText";
 import { parseCoursework } from "../../../lib/syllabus/parseCoursework";
 import { chunkItems } from "../../../lib/db/chunkItems";
+import { publishCandidateAsTask } from "../../../lib/tasks/publishCandidates";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const CANDIDATE_INSERT_SIZE = 5;
@@ -120,19 +121,25 @@ export async function POST(request: Request) {
     );
     if (parsed.length) {
       for (const candidates of chunkItems(parsed, CANDIDATE_INSERT_SIZE)) {
-        await db.insert(taskCandidates).values(
-          candidates.map((candidate) => ({
-            ...candidate,
-            syllabusId: syllabus.id,
-            courseId,
-          })),
-        );
+        const inserted = await db
+          .insert(taskCandidates)
+          .values(
+            candidates.map((candidate) => ({
+              ...candidate,
+              syllabusId: syllabus.id,
+              courseId,
+            })),
+          )
+          .returning();
+        for (const candidate of inserted) {
+          await publishCandidateAsTask(db, candidate, syllabus.id);
+        }
       }
     }
     await db
       .update(syllabi)
       .set({
-        processingStatus: "review",
+        processingStatus: "confirmed",
         processingError: parsed.length
           ? null
           : "No actionable coursework was found. Add items manually on the review screen.",
@@ -143,7 +150,7 @@ export async function POST(request: Request) {
         id: String(syllabus.id),
         courseId: String(courseId),
         filename: file.name,
-        status: "review",
+        status: "confirmed",
       },
       candidateCount: parsed.length,
     });

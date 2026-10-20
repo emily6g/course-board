@@ -1,6 +1,13 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { courses, tasks } from "../../../db/schema";
+import {
+  courses,
+  taskCandidates,
+  taskOverrides,
+  taskSourceHistory,
+  tasks,
+  taskStatuses,
+} from "../../../db/schema";
 import { isIsoDate } from "../../../lib/tasks/dates";
 import { taskTypes } from "../../../types/coursework";
 
@@ -77,4 +84,37 @@ export async function POST(request: Request) {
       source: task.source,
     },
   });
+}
+
+export async function DELETE(request: Request) {
+  const id = Number(new URL(request.url).searchParams.get("id"));
+  if (!Number.isInteger(id))
+    return Response.json(
+      { error: "A valid task is required." },
+      { status: 400 },
+    );
+  const db = getDb();
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
+  if (!task)
+    return Response.json({ error: "Task not found." }, { status: 404 });
+
+  const taskIdString = String(task.id);
+  await db.delete(taskOverrides).where(eq(taskOverrides.taskId, taskIdString));
+  await db.delete(taskStatuses).where(eq(taskStatuses.taskId, taskIdString));
+  await db
+    .delete(taskSourceHistory)
+    .where(eq(taskSourceHistory.taskId, task.id));
+
+  const candidateMatch = task.sourceEventId?.match(
+    /^syllabus-candidate-(\d+)$/,
+  );
+  if (candidateMatch) {
+    await db
+      .update(taskCandidates)
+      .set({ status: "rejected", updatedAt: new Date().toISOString() })
+      .where(eq(taskCandidates.id, Number(candidateMatch[1])));
+  }
+
+  await db.delete(tasks).where(eq(tasks.id, id));
+  return Response.json({ deleted: true });
 }
