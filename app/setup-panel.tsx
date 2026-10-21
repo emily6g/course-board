@@ -248,6 +248,23 @@ export default function SetupPanel({
 
   async function completeSetup() {
     if (!onFinish) return;
+    const pendingReview = syllabi.filter(
+      (syllabus) => syllabus.status === "review" || syllabus.status === "processing",
+    );
+    if (pendingReview.length) {
+      const codes = pendingReview
+        .map(
+          (syllabus) =>
+            courses.find((course) => course.id === syllabus.courseId)?.code ??
+            syllabus.filename,
+        )
+        .join(", ");
+      const proceed = window.confirm(
+        `These syllabi still need review before their coursework appears on the dashboard: ${codes}. ` +
+          "Open the dashboard anyway? You can finish reviewing them later from Settings.",
+      );
+      if (!proceed) return;
+    }
     setSaving(true);
     setMessage("");
     try {
@@ -338,9 +355,13 @@ export default function SetupPanel({
                   <span>
                     {syllabus?.status === "confirmed"
                       ? "✓ Ready"
-                      : syllabus
-                        ? syllabus.status
-                        : "Syllabus optional"}
+                      : syllabus?.status === "review"
+                        ? "Needs review before it appears on the dashboard"
+                        : syllabus?.status === "processing"
+                          ? "Processing…"
+                          : syllabus?.status === "failed"
+                            ? "Upload failed"
+                            : "Syllabus optional"}
                   </span>
                   {!syllabus && (
                     <button
@@ -759,8 +780,9 @@ export default function SetupPanel({
               </button>
             </div>
             <p>
-              Edit every uncertain item, uncheck anything that should be
-              excluded, then confirm.
+              These items are already on your dashboard. Edit a field and
+              click &quot;Save item&quot;, or uncheck anything you want
+              removed and click &quot;Update dashboard&quot; below.
             </p>
             <div className="candidate-list">
               {candidates.map((candidate, index) => (
@@ -912,7 +934,7 @@ export default function SetupPanel({
                     </button>
                   </div>
                   {(candidate.needsReview || candidate.confidence < 0.75) && (
-                    <span className="confidence-warning">{candidate.reviewReason ?? "Low confidence, review before publishing"}</span>
+                    <span className="confidence-warning">{candidate.reviewReason ?? "Low confidence, double check this item"}</span>
                   )}
                   {(candidate.sourcePage || candidate.sourceRow) && <small>Source, page {candidate.sourcePage ?? "?"}, row {candidate.sourceRow ?? "?"}</small>}
                 </article>
@@ -936,7 +958,7 @@ export default function SetupPanel({
                 Cancel
               </button>
               <button onClick={confirmCandidates} disabled={saving}>
-                Add coursework to Course Board
+                Update dashboard
               </button>
             </div>
           </section>

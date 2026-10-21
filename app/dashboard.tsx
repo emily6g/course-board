@@ -370,6 +370,37 @@ export default function Dashboard() {
     }
   }
 
+  async function deleteTask() {
+    if (!editDraft) return;
+    if (!window.confirm(`Delete "${editDraft.title}"? This cannot be undone.`))
+      return;
+    setEditSaving(true);
+    setEditError("");
+    try {
+      const response = await fetch(
+        `/api/tasks?id=${encodeURIComponent(editDraft.taskId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) throw new Error("The item could not be deleted.");
+      setBaseTasks((current) =>
+        current.filter((task) => task.id !== editDraft.taskId),
+      );
+      setOverrides((current) => {
+        const next = { ...current };
+        delete next[editDraft.taskId];
+        return next;
+      });
+      setEditingTaskId(null);
+      setEditDraft(null);
+    } catch (error) {
+      setEditError(
+        error instanceof Error ? error.message : "The item could not be deleted.",
+      );
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   const allCourses = useMemo(
     () => [
       ...baseCourses,
@@ -694,7 +725,10 @@ export default function Dashboard() {
               <label className="wide-field">Notes<textarea rows={4} placeholder="Add reminders, instructions, study topics, or anything else" value={editDraft.note ?? ""} onChange={(event) => setEditDraft({ ...editDraft, note: event.target.value })} /></label>
               {editError && <p className="edit-error" role="alert">{editError}</p>}
               <div className="edit-actions">
-                {overrides[editDraft.taskId] && <button className="restore-button" type="button" onClick={restoreOriginal} disabled={editSaving}>Restore original</button>}
+                <div className="edit-actions-start">
+                  {overrides[editDraft.taskId] && <button className="restore-button" type="button" onClick={restoreOriginal} disabled={editSaving}>Restore original</button>}
+                  <button className="delete-button" type="button" onClick={deleteTask} disabled={editSaving}>Delete</button>
+                </div>
                 <span />
                 <button className="cancel-button" type="button" onClick={closeEditor} disabled={editSaving}>Cancel</button>
                 <button className="save-button" type="submit" disabled={editSaving}>{editSaving ? "Saving" : "Save changes"}</button>

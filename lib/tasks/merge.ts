@@ -41,6 +41,12 @@ function assignmentNumber(value: string) {
   return normalizeTaskTitle(value).match(/\b\d+\b/)?.[0] ?? null;
 }
 
+function isSubsetOf(small: Set<string>, big: Set<string>) {
+  if (!small.size) return false;
+  for (const token of small) if (!big.has(token)) return false;
+  return true;
+}
+
 function safeCrossSourceMatch(a: SchoolTask, b: SchoolTask) {
   if (a.courseId !== b.courseId) return false;
   if (/\b(review|study guide|proposal|presentation|reflection)\b/i.test(a.title) !== /\b(review|study guide|proposal|presentation|reflection)\b/i.test(b.title)) return false;
@@ -49,10 +55,24 @@ function safeCrossSourceMatch(a: SchoolTask, b: SchoolTask) {
   const leftNumber = assignmentNumber(a.title);
   const rightNumber = assignmentNumber(b.title);
   const sameTitle = left === right && (left.length >= 3 || Boolean(leftNumber));
-  const strongNumberMatch = Boolean(leftNumber && leftNumber === rightNumber && similarity(a.title, b.title) >= 0.6);
-  const strongWordingMatch = a.type === b.type && similarity(a.title, b.title) >= 0.82;
+  const sameType = a.type === b.type;
+  // A matching assignment number plus the same work type and course is
+  // already specific enough on its own (e.g. syllabus "Homework 1" vs
+  // Canvas "Homework 1: Arrays and Loops") — a bare number is too short to
+  // register on the word-overlap score, so that score should not gate it.
+  const strongNumberMatch = Boolean(leftNumber && rightNumber && leftNumber === rightNumber && sameType);
+  // Without a number to anchor on, fall back to a high word-overlap score,
+  // or one title's words being a strict subset of the other's (Canvas
+  // restating the syllabus title with extra wording appended).
+  const leftTokens = tokens(a.title);
+  const rightTokens = tokens(b.title);
+  const strongWordingMatch =
+    sameType &&
+    (similarity(a.title, b.title) >= 0.82 ||
+      isSubsetOf(leftTokens, rightTokens) ||
+      isSubsetOf(rightTokens, leftTokens));
   const distance = dateDistance(a.due, b.due);
-  return (sameTitle && distance <= 30) || ((strongNumberMatch || strongWordingMatch) && distance <= 7);
+  return (sameTitle && distance <= 30) || ((strongNumberMatch || strongWordingMatch) && distance <= 14);
 }
 
 function dateDistance(a: string, b: string) {
